@@ -975,7 +975,6 @@
       </div>
     </div>
   </nav>
-  </nav>
 
   <main id="main-content">
     <div class="top-header-mobile">
@@ -2352,9 +2351,51 @@
     let cachedCompletedSalesMap = {}; // 暫存完銷檔單號對照表
     let cachedDepositRows = [];        // 暫存訂金檔所有資料列
 
-    function openConversion() {
+    // 1. 單號極致清洗：只保留純英數字與減號，徹底清除 \x80 及所有不可見控制字元
+    function cleanOrderNumber(val) {
+      if (val === null || val === undefined) return '';
+      return String(val)
+        .replace(/[^\w-]/g, '') // 只保留 A-Z, a-z, 0-9, _ 與 -
+        .toUpperCase()
+        .trim();
+    }
+
+    // 2. 超強寬鬆日期解析：支援 Excel 序列數值 (如 45536)、民國年、西元年與字串
+    function parseFlexibleDate(val) {
+      if (val === null || val === undefined || val === '') return null;
+
+      // (A) 若是 Excel 序列日期數字 (例如 45536 代表 2024年某日)
+      if (typeof val === 'number' || (!isNaN(val) && Number(val) > 20000 && Number(val) < 60000)) {
+        const num = Number(val);
+        // Excel 基準日為 1899-12-30
+        const date = new Date(Math.round((num - 25569) * 86400 * 1000));
+        return isNaN(date.getTime()) ? null : date;
+      }
+
+      // (B) 若為字串型日期
+      let str = String(val).trim().split(' ')[0].replace(/\./g, '/').replace(/-/g, '/');
+      const parts = str.split('/');
+
+      if (parts.length >= 3) {
+        let y = parseInt(parts[0], 10);
+        let m = parseInt(parts[1], 10);
+        let d = parseInt(parts[2], 10);
+
+        // 民國年判斷 (例如 113, 114, 115)
+        if (y < 1900) {
+          y += 1911;
+        }
+        const parsed = new Date(y, m - 1, d);
+        return isNaN(parsed.getTime()) ? null : parsed;
+      }
+
+      const directParsed = new Date(str);
+      return isNaN(directParsed.getTime()) ? null : directParsed;
+    }
+
+    async function openConversion() {
       currentMode = 'conversion';
-      switchContainer('conversion-container', 'btn-conversion', '締結率計算');
+      if (!switchContainer('conversion-container', 'btn-conversion', '締結率計算')) return;
       
       const now = new Date();
       const lastMonth1st = new Date(now.getFullYear(), now.getMonth() - 1, 1);
@@ -2362,14 +2403,541 @@
       const sStr = `${lastMonth1st.getFullYear()}-${pad(lastMonth1st.getMonth() + 1)}-01`;
       const eStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
       
-      document.getElementById('conversion-date-start').value = sStr;
-      document.getElementById('conversion-date-end').value = eStr;
+      if (!document.getElementById('conversion-date-start').value) {
+        document.getElementById('conversion-date-start').value = sStr;
+      }
+      if (!document.getElementById('conversion-date-end').value) {
+        document.getElementById('conversion-date-end').value = eStr;
+      }
 
-      // 若已有匯入暫存檔，直接用匯入檔重算；否則向 Supabase 撈取
       if (cachedDepositRows.length > 0) {
-        processImportedPerformanceData();
+        await processImportedPerformanceData();
       } else {
-        loadConversionData();
+        await loadConversionData();
+      }
+    }
+
+    // 輔助函式：單號格式化為末 6 碼顯示
+    function formatOrder6(val) {
+      const clean = cleanOrderNumber(val);
+      if (!clean) return '';
+      return clean.length > 6 ? clean.slice(-6) : clean;
+    }
+
+    // 1. 業績檔案匯入模式 (支援三層匹配：完銷檔 > 資料庫諮詢檔 > 手動未分類)
+    async function processImportedPerformanceData() {
+      const s = document.getElementById('conversion-date-start').value;
+      const e = document.getElementById('conversion-date-end').value;
+
+      const startDate = s ? new Date(s) : new Date('2000-01-01');
+      startDate.setHours(0, 0, 0, 0);
+      const endDate = e ? new Date(e) : new Date('2099-12-31');
+      endDate.setHours(23, 59, 59, 999);
+
+      if (cachedDepositRows.length === 0) {
+        alert("尚未匯入訂金檔 (TempRpt_RSIRUnGet)，請先點選匯入！");
+        return;
+      }
+
+      showMask('正在彙整諮詢接待與業績資料...');
+
+      try {
+        // (A) 撈取在職員工清單
+        const { data: staffSetting } = await _supabase.from('system_settings').select('value').eq('key', 'staff_list').single();
+        const activeStaffList = (staffSetting && staffSetting.value) ? staffSetting.value.filter(x => x && x !== '全員') : [];
+
+        // (B) 撈取全部諮詢紀錄
+        const { data: consultData, error } = await _supabase.from('consultations').select('*');
+        if (error) throw error;
+
+        // 建立資料庫諮詢檔的單號與客戶對照 Map (第二優先比對使用)
+        const consultOrderMap = {};
+        const consultCustomerMap = {};
+        (consultData || []).forEach(c => {
+          const cStaff = (c.staff || '').trim();
+          if (c.order_no) {
+            const cOrderClean = cleanOrderNumber(c.order_no);
+            if (cOrderClean) consultOrderMap[cOrderClean] = cStaff;
+          }
+          if (c.name && c.name !== '未登記') {
+            consultCustomerMap[c.name.trim()] = cStaff;
+          }
+        });
+
+        // (C) 步驟一：過濾日期區間，並將訂金檔中的「同一單號」合併加總
+        const consolidatedOrderMap = {};
+        cachedDepositRows.forEach((row, rIdx) => {
+          const rawDateVal = row[0];
+          const rowDate = parseFlexibleDate(rawDateVal);
+          if (!rowDate || rowDate < startDate || rowDate > endDate) return;
+
+          const orderNo = cleanOrderNumber(row[24]);
+          const customerName = String(row[2] || '未登記').trim();
+          const amount = parseFloat(String(row[14]).replace(/,/g, '')) || 0;
+          const uniqueKey = orderNo ? orderNo : `NO_ORDER_${customerName}_${rIdx}`;
+
+          if (!consolidatedOrderMap[uniqueKey]) {
+            consolidatedOrderMap[uniqueKey] = {
+              orderNo: orderNo,
+              customerName: customerName,
+              totalAmount: 0,
+              date: rowDate
+            };
+          }
+          consolidatedOrderMap[uniqueKey].totalAmount += amount;
+          if (customerName && customerName !== '未登記' && consolidatedOrderMap[uniqueKey].customerName === '未登記') {
+            consolidatedOrderMap[uniqueKey].customerName = customerName;
+          }
+        });
+
+        // (D) 步驟二：建立人員統計容器 (預載在職員工)
+        const statsContainer = {};
+        const staffList = [];
+
+        const initStaffGroup = (stName) => {
+          const cleanName = (stName || '').trim();
+          if (!cleanName) return;
+          if (!statsContainer[cleanName]) {
+            statsContainer[cleanName] = { total: 0, closed: 0, sumAmount: 0, maxAmount: 0, details: [] };
+            staffList.push(cleanName);
+          }
+        };
+
+        activeStaffList.forEach(st => initStaffGroup(st));
+
+        // 規則 1：諮詢紀錄 (純對應 col: staff)，在區間內且未成交 (非特殊、非締結) 者計入分母
+        (consultData || []).forEach(c => {
+          const cDate = parseFlexibleDate(c.created_at);
+          if (!cDate || cDate < startDate || cDate > endDate) return;
+
+          const statusStr = String(c.status || '').trim();
+          const isSpecial = statusStr.includes('特殊');
+          const isClosed = (statusStr === '締結');
+
+          // 只抓「接待未成交」：非特殊 且 非締結
+          if (!isSpecial && !isClosed) {
+            const staffName = (c.staff || '未指定人員').trim();
+            initStaffGroup(staffName);
+            const group = statsContainer[staffName];
+
+            group.total++; // 接待分母 +1
+            group.details.push({
+              customerName: c.name || '未登記',
+              mainText: c.note || '接待未成交',
+              status: statusStr || '未成交',
+              amount: 0
+            });
+          }
+        });
+
+        // 規則 2：訂金檔承件三層比對 (1.完銷檔 -> 2.諮詢紀錄 -> 3.手動未分類)
+        Object.values(consolidatedOrderMap).forEach(item => {
+          const orderNo = item.orderNo;
+          let matchedStaff = "";
+          let isCompleted = false;
+
+          // 第一優先：比對 1 檔 (完銷檔 H 欄)
+          if (orderNo && cachedCompletedSalesMap[orderNo]) {
+            matchedStaff = cachedCompletedSalesMap[orderNo].staff.trim();
+            isCompleted = true;
+          }
+          // 第二優先：比對 Supabase 諮詢紀錄 (order_no 或 客戶名)
+          else if (orderNo && consultOrderMap[orderNo]) {
+            matchedStaff = consultOrderMap[orderNo];
+            isCompleted = true;
+          } else if (item.customerName && consultCustomerMap[item.customerName]) {
+            matchedStaff = consultCustomerMap[item.customerName];
+            isCompleted = true;
+          }
+
+          // 第三優先：對不到則歸入手動「未銷貨/未指定人員」
+          const staffName = matchedStaff ? matchedStaff : "未銷貨/未指定人員";
+          initStaffGroup(staffName);
+          const group = statsContainer[staffName];
+
+          group.total++; // 接待總數 +1
+
+          if (isCompleted) {
+            group.closed++; // 成功締結 +1
+            group.sumAmount += item.totalAmount;
+            if (item.totalAmount > group.maxAmount) group.maxAmount = item.totalAmount;
+          }
+
+          // 純存單號 (末6碼由渲染端處理，避免重複加上單號文字)
+          group.details.push({
+            customerName: item.customerName,
+            mainText: orderNo ? orderNo : '無單號',
+            status: isCompleted ? '締結' : '待處理',
+            amount: item.totalAmount
+          });
+        });
+
+        // (E) 步驟三：計算最終締結率與客單價
+        staffList.forEach(staff => {
+          const g = statsContainer[staff];
+          g.rate = g.total > 0 ? ((g.closed / g.total) * 100).toFixed(1) : "0.0";
+          g.avgAmount = g.closed > 0 ? Math.round(g.sumAmount / g.closed) : 0;
+        });
+
+        globalConversionRes = {
+          data: statsContainer,
+          staffList: staffList,
+          updateDate: new Date().toLocaleDateString('zh-TW')
+        };
+
+        globalConversionRes.staffList.forEach(st => {
+          if (globalConversionRes.data[st]) {
+            globalConversionRes.data[st].originalDetails = [...globalConversionRes.data[st].details];
+            if (st.indexOf('未銷') !== -1 || st.indexOf('未指定') !== -1) {
+              globalConversionRes.data[st].details.forEach((d, dIdx) => {
+                d.fromSpecialStaff = st;
+                d.originalIndex = dIdx;
+              });
+            }
+          }
+        });
+
+        renderConversionStats(globalConversionRes);
+        hideMask();
+      } catch (err) {
+        hideMask();
+        alert("成效統計失敗: " + err.message);
+      }
+    }
+
+    function renderConversionStats(res) {
+      const currentScrollTop = window.scrollY || document.documentElement.scrollTop;
+
+      const openExternalStaffs = [];
+      const openInternalStaffs = [];
+      document.querySelectorAll('.mini-chart-box[data-staff]').forEach(box => {
+        const sName = box.getAttribute('data-staff');
+        const deElements = box.querySelectorAll('details');
+        if (deElements[0] && deElements[0].open) openExternalStaffs.push(sName);
+        if (deElements.length > 1) {
+          if (deElements[1] && deElements[1].open) openInternalStaffs.push(sName);
+        } else if (deElements[0] && deElements[0].open) {
+          openInternalStaffs.push(sName);
+        }
+      });
+
+      hideMask();
+      const container = document.getElementById('conversion-content');
+      if(!res.staffList || res.staffList.length === 0) { 
+        container.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:20px; color:#999;">此區間內無相符的紀錄資料</div>'; 
+        return; 
+      }
+
+      const sDate = document.getElementById('conversion-date-start').value.replace(/-/g, '/');
+      const eDate = document.getElementById('conversion-date-end').value.replace(/-/g, '/');
+
+      const sortedStaffList = [...res.staffList].sort((a, b) => {
+        const isSpecialA = (a.indexOf('未銷') !== -1 || a.indexOf('未指定') !== -1);
+        const isSpecialB = (b.indexOf('未銷') !== -1 || b.indexOf('未指定') !== -1);
+        return isSpecialA - isSpecialB; 
+      });
+
+      const normalStaffOptions = sortedStaffList.filter(s => s.indexOf('未銷') === -1 && s.indexOf('未指定') === -1);
+
+      let tableRowsHtml = '';
+      sortedStaffList.forEach((staff) => {
+        const item = res.data[staff];
+        const isSpecial = (staff.indexOf('未銷') !== -1 || staff.indexOf('未指定') !== -1);
+        const rowBgColor = isSpecial ? '#f1f3f4' : '#ffffff';
+        
+        tableRowsHtml += `
+          <tr style="border-bottom: 1px solid #eef1f2; font-size: 13px; color: #546e7a; background: ${rowBgColor};">
+            <td style="padding: 12px 10px; font-weight: bold; color: ${isSpecial ? '#78909c' : '#37474f'};">👤 ${staff}</td>
+            <td style="padding: 12px 10px; text-align: center; font-weight: bold; color: #2e7d32;">${item.total} / ${item.closed}</td>
+            <td style="padding: 12px 10px; text-align: center; color: #1976d2; font-weight: bold;">${item.rate}%</td>
+            <td style="padding: 12px 10px; text-align: right; font-weight: bold; color: #333;">$${item.sumAmount.toLocaleString()}</td>
+            <td style="padding: 12px 10px; text-align: right; color: #546e7a;">$${item.avgAmount.toLocaleString()}</td>
+            <td style="padding: 12px 10px; text-align: right; color: #ef6c00; font-weight: bold;">$${item.maxAmount.toLocaleString()}</td>
+          </tr>
+        `;
+      });
+
+      let html = `
+        <div class="mini-chart-box" id="conversion-master-summary-card" style="grid-column: 1 / -1; height: auto; display: block; padding: 24px; background: #ffffff; border: 1px solid #cfd8dc; box-shadow: 0 4px 12px rgba(0,0,0,0.05); border-radius: 12px; margin-bottom: 20px;">
+          <div class="box-header" style="border-bottom: 2px solid #b0bec5; padding-bottom: 14px; margin-bottom: 16px; align-items: center; justify-content: space-between; display: flex;">
+            <div class="box-title" style="font-size: 16px; color: #263238; display: flex; align-items: center; background: none; padding: 0; margin: 0;">
+              <span style="background: #eceff1; padding: 6px 14px; border-radius: 8px; font-weight: bold; color: #37474f;">📋 團隊締結成效業績總表</span>
+            </div>
+            <button onclick="shareMasterSummaryCard()" style="background: #00c300; color: white; border: none; padding: 7px 16px; border-radius: 20px; font-size: 13px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 6px rgba(0,195,0,0.3); display: inline-flex; align-items: center; gap: 4px; outline: none;">📸 匯出主管總表</button>
+          </div>
+          <div style="display: flex; gap: 15px; margin-bottom: 16px; font-size: 13px; color: #607d8b; flex-wrap: wrap; background: #f8f9fa; padding: 10px 14px; border-radius: 8px; border: 1px solid #edf0f2;">
+            <div>📅 <b>統計期間：</b>${sDate} ~ ${eDate}</div>
+            <div>🔄 <b>更新日期：</b>${res.updateDate || '無'}</div>
+          </div>
+          <div style="overflow-x: auto; width: 100%; margin-bottom: 10px;">
+            <table style="width: 100%; border-collapse: collapse; text-align: left; min-width: 580px;">
+              <thead>
+                <tr style="background: #f4f6f7; border-bottom: 2px solid #cfd8dc; font-size: 13px; color: #455a64;">
+                  <th style="padding: 10px; font-weight: bold;">服務人</th>
+                  <th style="padding: 10px; text-align: center; font-weight: bold;">總件 / 締結</th>
+                  <th style="padding: 10px; text-align: center; font-weight: bold;">締結率</th>
+                  <th style="padding: 10px; text-align: right; font-weight: bold;">總金額</th>
+                  <th style="padding: 10px; text-align: right; font-weight: bold;">平均金額</th>
+                  <th style="padding: 10px; text-align: right; font-weight: bold;">最高金額</th>
+                </tr>
+              </thead>
+              <tbody> ${tableRowsHtml} </tbody>
+            </table>
+          </div>
+          <div style="font-size: 12px; color: #90a4ae; text-align: center; font-weight: bold; margin-top: 15px; padding-top: 12px; border-top: 1px dashed #e0e0e0; letter-spacing: 0.5px; user-select: none;">
+            [紀錄皆為完銷後，或手動登記後列入統計]
+          </div>
+        </div>
+      `;
+
+      sortedStaffList.forEach((staff, index) => {
+        const item = res.data[staff];
+        const cardId = `conversion-card-${index}`;
+        const isSpecial = (staff.indexOf('未銷') !== -1 || staff.indexOf('未指定') !== -1);
+        const cardBgStyle = isSpecial ? 'background: #f5f7f8; border: 1px solid #dcdfe1; box-shadow: none;' : 'background: #ffffff; border: 1px solid #eee;';
+        
+        const isExtOpen = openExternalStaffs.includes(staff) ? 'open' : '';
+        const isInternalOpen = openInternalStaffs.includes(staff) ? 'open' : '';
+
+        const detailsHtml = item.details.map((d, dIdx) => {
+          const rawText = String(d.mainText || '').trim();
+          let displayLabelText = '';
+
+          // 判斷是否為單號並轉為末 6 碼
+          if (d.status === '締結' || rawText.match(/^\d+$/) || rawText.includes('單號')) {
+            const cleanNo = cleanOrderNumber(rawText);
+            const short6 = formatOrder6(cleanNo);
+            displayLabelText = `🧾 單號: ${short6 || rawText}`;
+          } else {
+            displayLabelText = `💬 備註: ${rawText || '無'}`;
+          }
+
+          const rowBg = dIdx % 2 === 0 ? '#ffffff' : (isSpecial ? '#ebeded' : '#f7f9f8');
+          
+          let rightSideHtml = '';
+          if (d.amount > 0) {
+            rightSideHtml = `
+              <span style="color:${d.status === '締結' ? '#43a047' : '#ef5350'}; font-weight:bold;">${d.status || '未處理'}</span>
+              <span style="color:#333; font-weight:bold; min-width:60px; text-align:right;">$${d.amount.toLocaleString()}</span>
+            `;
+          } else {
+            const statusText = String(d.status || '').trim();
+            const displayText = statusText !== '' ? statusText : '未處理';
+            let labelStyle = 'font-weight:bold;';
+            if (displayText === '未處理' || displayText === '未成交') {
+              labelStyle += 'color:#78909c; background:#eceff1; padding:2px 8px; border-radius:4px; font-size:12px;';
+            } else if (displayText === '締結') {
+              labelStyle += 'color:#43a047;';
+            } else { 
+              labelStyle += 'color:#ef5350;'; 
+            }
+            rightSideHtml = `<span style="${labelStyle}">${displayText}</span>`;
+          }
+          
+          let assignSelectHtml = '';
+          if (isSpecial && normalStaffOptions.length > 0) {
+            assignSelectHtml = `
+              <select onchange="reassignItem('${staff}', ${dIdx}, this.value, this)" style="margin-top:4px; padding:3px 6px; font-size:12px; border-radius:4px; border:1px solid #cfd8dc; background:#fff; color:#455a64; outline:none; cursor:pointer;">
+                <option value="">🔄 歸類此單給...</option>
+                ${normalStaffOptions.map(opt => `<option value="${opt}" ${d.assignedTo === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+              </select>
+            `;
+          } else if (!isSpecial && d.fromSpecialStaff) {
+            assignSelectHtml = `
+              <button onclick="returnToUnclassified('${d.fromSpecialStaff}', ${d.originalIndex}, this)" style="margin-top:4px; padding:3px 8px; font-size:11px; border-radius:4px; border:1px solid #ffcdd2; background:#fff2f2; color:#d32f2f; cursor:pointer; outline:none; font-weight:bold; display:inline-flex; align-items:center; gap:2px; transition:0.2s;">↩️ 退回未分類</button>
+            `;
+          }
+          
+          return `
+            <div class="conversion-detail-row" style="display:flex; justify-content:space-between; font-size:13px; padding:8px 12px; background:${rowBg}; border-radius:6px; margin-bottom:4px; align-items:center; flex-wrap:wrap; gap:12px;">
+              <div style="display:flex; flex-direction:column; gap:4px; flex:1; min-width:200px;">
+                <div style="color:#546e7a; font-weight:bold; word-break:break-all; line-height:1.4; display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
+                  <span style="background:#efebe9; color:#4e342e; padding:2px 6px; border-radius:4px; font-size:11px; flex-shrink:0; user-select:none;">👤 客戶: ${d.customerName || '未登記'}</span>
+                  <span style="font-size:13px; color:#546e7a;">${displayLabelText}</span>
+                </div>
+                ${assignSelectHtml}
+              </div>
+              <div style="display:flex; align-items:center; gap:10px; flex-shrink:0;"> ${rightSideHtml} </div>
+            </div>
+          `;
+        }).join('');
+
+        html += `
+          <div class="mini-chart-box" id="${cardId}" data-staff="${staff}" style="grid-column: 1 / -1; height: auto; display:block; padding: 22px; ${cardBgStyle}">
+            <div class="box-header" style="border-bottom: 1px solid #f0f0f0; padding-bottom: 14px; margin-bottom:14px; align-items: center; flex-wrap: wrap; gap: 10px;">
+              <div class="box-title" style="font-size:15px; color:var(--primary-color); display:flex; align-items:center; flex-wrap:wrap; gap:5px; background:none; padding:0; margin:0;">
+                <span style="background:${isSpecial ? '#e4e8ea' : '#f4f7f6'}; padding:6px 12px; border-radius:8px; font-weight:bold; color: ${isSpecial ? '#546e7a' : 'inherit'};">👤 服務人：${staff}</span>
+                <span style="font-size:12px; color:#78909c; font-weight:normal; margin-left:8px; background:#f0f4f2; padding:2px 8px; border-radius:6px;">📅 ${sDate} ~ ${eDate}</span>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <div class="box-total" style="background:#e3f2fd; color:#1976d2; font-size:14px; padding:5px 12px; border-radius:8px; margin:0;">
+                  綜合締結率：<b id="rate-text-${index}" style="font-size:16px;">${item.rate}%</b>
+                </div>
+                <span style="font-size:12px; color:#b76e00; background:#fff8e1; border:1px solid #ffe082; padding:5px 10px; border-radius:15px; font-weight:bold; white-space:nowrap; display:inline-flex; align-items:center; gap:3px;">
+                  🔄 更新日: ${res.updateDate || '無'}
+                </span>
+                <button onclick="shareConversionCard('${cardId}', '${staff}')" style="background:#00c300; color:white; border:none; padding:5px 12px; border-radius:15px; font-size:13px; font-weight:bold; cursor:pointer; box-shadow: 0 2px 5px rgba(0,195,0,0.2);">📸 分享</button>
+              </div>
+            </div>
+            
+            <details ${isExtOpen} style="border: 1px dashed #a5d6a7; border-radius:12px; background:#f4f9f5; padding:8px 14px; margin-bottom:15px; outline:none;">
+              <summary style="font-size:13px; color:#2e7d32; font-weight:bold; cursor:pointer; outline:none; user-select:none;">🛠️ 展開/收起：手動混入外部未登記數據擴充欄位</summary>
+              <div style="display:flex; gap:15px; margin-top:12px; flex-wrap:wrap; align-items:center;">
+                <div style="flex:1; min-width:240px; display:flex; align-items:center; gap:10px;">
+                  <label style="font-size:13px; color:#2e7d32; font-weight:bold; white-space:nowrap; margin:0;">➕ 加入未登記締結件數</label>
+                  <div style="position:relative; flex:1; display:flex; align-items:center;">
+                    <input type="text" inputmode="numeric" id="ext-closed-${index}" class="date-input" style="width:100%; height:36px; background:#ffffff; border-color:#c8e6c9; padding:0 28px 0 10px; margin:0; font-size:14px;" placeholder="0" oninput="this.value=this.value.replace(/[^0-9]/g,''); recalcConversion(${index}, ${item.total}, ${item.closed}, ${item.sumAmount}, ${item.maxAmount})">
+                    <button onclick="document.getElementById('ext-closed-${index}').value=''; recalcConversion(${index}, ${item.total}, ${item.closed}, ${item.sumAmount}, ${item.maxAmount});" style="position:absolute; right:6px; background:none; border:none; color:#ff8a80; cursor:pointer; font-size:14px; font-weight:bold; padding:2px 4px; outline:none;">✕</button>
+                  </div>
+                </div>
+                <div style="flex:1; min-width:240px; display:flex; align-items:center; gap:10px;">
+                  <label style="font-size:13px; color:#2e7d32; font-weight:bold; white-space:nowrap; margin:0;">加總外部總金額</label>
+                  <div style="position:relative; flex:1; display:flex; align-items:center;">
+                    <input type="text" inputmode="decimal" id="ext-amount-${index}" class="date-input" style="width:100%; height:36px; background:#ffffff; border-color:#c8e6c9; padding:0 28px 0 10px; margin:0; font-size:14px;" placeholder="0" oninput="this.value=this.value.replace(/[^0-9.]/g,''); recalcConversion(${index}, ${item.total}, ${item.closed}, ${item.sumAmount}, ${item.maxAmount})">
+                    <button onclick="document.getElementById('ext-amount-${index}').value=''; recalcConversion(${index}, ${item.total}, ${item.closed}, ${item.sumAmount}, ${item.maxAmount});" style="position:absolute; right:6px; background:none; border:none; color:#ff8a80; cursor:pointer; font-size:14px; font-weight:bold; padding:2px 4px; outline:none;">✕</button>
+                  </div>
+                </div>
+              </div>
+            </details>
+            
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap:12px; margin-bottom: 15px;">
+              <div style="background:${isSpecial ? '#e2ebd5' : '#e8f5e9'}; border: 1px solid ${isSpecial ? '#c0d6a4' : '#c8e6c9'}; padding:10px; border-radius:10px; text-align:center;">
+                <div style="font-size:12px; color:#2e7d32; font-weight:bold; margin-bottom:4px;">總件 / 締結</div>
+                <div id="count-text-${index}" style="font-size:16px; font-weight:bold; color:#1b5e20;">${item.total} / <span style="font-size:19px; color:#2e7d32; font-weight:900;">${item.closed}</span></div>
+              </div>
+              <div style="background:#ffffff; border: 1px solid #e0e0e0; padding:10px; border-radius:10px; text-align:center;">
+                <div style="font-size:12px; color:#78909c; margin-bottom:4px;">總金額</div>
+                <div id="sum-text-${index}" style="font-size:16px; font-weight:bold; color:#333;">$${item.sumAmount.toLocaleString()}</div>
+              </div>
+              <div style="background:#ffffff; border: 1px solid #e0e0e0; padding:10px; border-radius:10px; text-align:center;">
+                <div style="font-size:12px; color:#78909c; margin-bottom:4px;">平均金額</div>
+                <div id="avg-text-${index}" style="font-size:16px; font-weight:bold; color:#1976d2;">$${item.avgAmount.toLocaleString()}</div>
+              </div>
+              <div style="background:#ffffff; border: 1px solid #e0e0e0; padding:10px; border-radius:10px; text-align:center;">
+                <div style="font-size:12px; color:#78909c; margin-bottom:4px;">最高金額</div>
+                <div id="max-text-${index}" style="font-size:16px; font-weight:bold; color:#ef6c00;">$${item.maxAmount.toLocaleString()}</div>
+                <div style="font-size:11px; color:#90a4ae; margin-top:4px; font-weight:bold;">[僅顯示有登記紀錄]</div>
+              </div>
+            </div>
+            
+            <details ${isInternalOpen} style="border: 1px solid #eee; border-radius:10px; padding:6px 12px; background:#fff;">
+              <summary style="font-size:13px; color:#546e7d; font-weight:bold; cursor:pointer; outline:none; user-select:none;">📋 展開查看內部系統明細 (${item.total} 筆)</summary>
+              <div style="margin-top:10px; max-height:260px; overflow-y:auto; padding:5px; background:#ffffff; border-radius:8px;">
+                ${detailsHtml}
+              </div>
+            </details>
+          </div>
+        `;
+      });
+      
+      container.innerHTML = html;
+      
+      setTimeout(() => {
+        window.scrollTo({
+          top: currentScrollTop,
+          behavior: 'instant'
+        });
+      }, 80);
+    }
+
+    // 2. 原生 Supabase 查詢模式：嚴格對應 col: staff
+    async function loadConversionData() {
+      if (cachedDepositRows.length > 0) {
+        await processImportedPerformanceData();
+        return;
+      }
+
+      const s = document.getElementById('conversion-date-start').value;
+      const e = document.getElementById('conversion-date-end').value;
+      const startDate = s ? new Date(s) : new Date('2000-01-01'); startDate.setHours(0, 0, 0, 0);
+      const endDate = e ? new Date(e) : new Date('2099-12-31'); endDate.setHours(23, 59, 59, 999);
+
+      showMask('成效計算中 (Supabase)...');
+
+      try {
+        const { data: staffSetting } = await _supabase.from('system_settings').select('value').eq('key', 'staff_list').single();
+        const activeStaffList = (staffSetting && staffSetting.value) ? staffSetting.value.filter(x => x && x !== '全員') : [];
+
+        const { data, error } = await _supabase.from('consultations').select('*');
+        if (error) throw error;
+
+        const statsContainer = {};
+        const staffList = [];
+
+        const initStaffGroup = (stName) => {
+          const cleanName = (stName || '').trim();
+          if (!cleanName) return;
+          if (!statsContainer[cleanName]) {
+            statsContainer[cleanName] = { total: 0, closed: 0, sumAmount: 0, maxAmount: 0, details: [] };
+            staffList.push(cleanName);
+          }
+        };
+
+        activeStaffList.forEach(st => initStaffGroup(st));
+
+        (data || []).forEach(row => {
+          const cDate = parseFlexibleDate(row.created_at);
+          if (!cDate || cDate < startDate || cDate > endDate) return;
+
+          const status = String(row.status || '').trim();
+          const isSpecial = status.includes('特殊');
+          const isClosed = (status === "締結" || isSpecial);
+
+          const staffName = (row.staff || "未指定人員").trim(); // 嚴格對應 col: staff
+          const customerName = row.name || "未登記";
+          const amount = parseFloat(row.amount) || 0;
+
+          initStaffGroup(staffName);
+          const group = statsContainer[staffName];
+
+          if (!isSpecial && !isClosed) {
+            group.total++; // 接待未成交
+          } else if (isClosed) {
+            group.total++;  // 總接待 +1
+            group.closed++; // 成功締結 +1
+            group.sumAmount += amount;
+            if (amount > group.maxAmount) group.maxAmount = amount;
+          }
+
+          const mainText = isClosed ? (row.order_no || row.sales_note || (isSpecial ? "特殊結案" : "已締結")) : (row.note || "接待未成交");
+
+          group.details.push({
+            customerName: customerName,
+            mainText: mainText,
+            status: isClosed ? (isSpecial ? '特殊' : '締結') : (status || '未締結'),
+            amount: amount
+          });
+        });
+
+        staffList.forEach(staff => {
+          const g = statsContainer[staff];
+          g.rate = g.total > 0 ? ((g.closed / g.total) * 100).toFixed(1) : "0.0";
+          g.avgAmount = g.closed > 0 ? Math.round(g.sumAmount / g.closed) : 0;
+        });
+
+        globalConversionRes = {
+          data: statsContainer,
+          staffList: staffList,
+          updateDate: new Date().toLocaleDateString('zh-TW')
+        };
+
+        globalConversionRes.staffList.forEach(st => {
+          if (globalConversionRes.data[st]) {
+            globalConversionRes.data[st].originalDetails = [...globalConversionRes.data[st].details];
+            if (st.indexOf('未銷') !== -1 || st.indexOf('未指定') !== -1) {
+              globalConversionRes.data[st].details.forEach((d, dIdx) => {
+                d.fromSpecialStaff = st;
+                d.originalIndex = dIdx;
+              });
+            }
+          }
+        });
+
+        renderConversionStats(globalConversionRes);
+        hideMask();
+      } catch (e) {
+        hideMask();
+        alert("成效計算失敗: " + e.message);
       }
     }
 
@@ -2399,17 +2967,23 @@
       }
 
       try {
+        // (A) 解析 1 檔：完銷檔 (Q欄:索引16, F欄:索引5, G欄:索引6)
         if (completedFile) {
           const compData = await parseExcelOrCsv(completedFile);
           cachedCompletedSalesMap = {};
+          let compValidCount = 0;
+
           compData.forEach((row, idx) => {
-            if (idx === 0) return;
-            const orderNo = String(row[16] || '').trim();
-            const amount = parseFloat(row[5]) || 0;
-            const staffName = String(row[6] || '').trim();
+            if (idx === 0) return; // 略過表頭
+            const rawOrderNo = row[16];
+            const orderNo = cleanOrderNumber(rawOrderNo); // 強效清洗單號
+            const amount = parseFloat(String(row[5]).replace(/,/g, '')) || 0; // 去除千分位逗號
+            const staffName = String(row[7] || '').trim(); // 已改為 H 欄 (索引 7)
+
             if (orderNo) {
               if (!cachedCompletedSalesMap[orderNo]) {
-                cachedCompletedSalesMap[orderNo] = { staff: staffName, totalAmount: 0 };
+                cachedCompletedSalesMap[orderNo] = { staff: staffName, totalAmount: 0, rawNo: rawOrderNo };
+                compValidCount++;
               }
               cachedCompletedSalesMap[orderNo].totalAmount += amount;
               if (staffName && !cachedCompletedSalesMap[orderNo].staff) {
@@ -2417,11 +2991,14 @@
               }
             }
           });
+          console.log(`[完銷檔] 成功讀取有效單號共 ${compValidCount} 筆，樣例：`, Object.keys(cachedCompletedSalesMap).slice(0, 5));
         }
 
+        // (B) 解析 2 檔：訂金檔 (A欄:索引0, Y欄:索引24, C欄:索引2, O欄:索引14)
         if (depositFile) {
           const depData = await parseExcelOrCsv(depositFile);
           cachedDepositRows = depData.slice(1);
+          console.log(`[訂金檔] 成功讀入 ${cachedDepositRows.length} 列資料`);
         }
 
         const statusEl = document.getElementById('imported-files-status');
@@ -2439,6 +3016,8 @@
         alert("檔案讀取失敗: " + err.message);
       }
     }
+
+    
 
     // 清除已匯入檔案並重置為 Supabase 查詢
     function clearImportedPerformanceFiles() {
@@ -2530,178 +3109,6 @@
         reader.onerror = reject;
         reader.readAsArrayBuffer(file);
       });
-    }
-
-    // 2. 依日期區間交叉比對雙檔並產生成效結構
-    function processImportedPerformanceData() {
-      const s = document.getElementById('conversion-date-start').value;
-      const e = document.getElementById('conversion-date-end').value;
-      const startDate = new Date(s); startDate.setHours(0,0,0,0);
-      const endDate = new Date(e); endDate.setHours(23,59,59,999);
-
-      if (cachedDepositRows.length === 0) {
-        alert("尚未匯入訂金檔 (TempRpt_RSIRUnGet)，請先點選匯入！");
-        return;
-      }
-
-      const statsContainer = {};
-      const staffList = [];
-
-      cachedDepositRows.forEach(row => {
-        // A 欄 (索引 0): 日期
-        const rawDateStr = String(row[0] || '').trim().replace(/\//g, '-');
-        if (!rawDateStr) return;
-        const rowDate = new Date(rawDateStr);
-        if (isNaN(rowDate.getTime()) || rowDate < startDate || rowDate > endDate) return;
-
-        // Y 欄 (索引 24): 三聯單號
-        const orderNo = String(row[24] || '').trim();
-        // C 欄 (索引 2): 客戶名
-        const customerName = String(row[2] || '未登記').trim();
-        // O 欄 (索引 14): 訂金/交易金額
-        const amount = parseFloat(row[14]) || 0;
-
-        // 向 1 檔比對銷售人
-        let matchedStaff = "";
-        let isCompleted = false;
-
-        if (orderNo && cachedCompletedSalesMap[orderNo]) {
-          matchedStaff = cachedCompletedSalesMap[orderNo].staff;
-          isCompleted = true;
-        }
-
-        // 若比對不到銷售人，歸入「未銷貨/未指定」
-        const staffName = matchedStaff ? matchedStaff : "未銷貨/未指定人員";
-        const status = isCompleted ? "締結" : "待處理";
-        const mainText = orderNo ? orderNo : "無單號";
-
-        if (!statsContainer[staffName]) {
-          statsContainer[staffName] = { total: 0, closed: 0, sumAmount: 0, maxAmount: 0, details: [] };
-          staffList.push(staffName);
-        }
-
-        const group = statsContainer[staffName];
-        group.total++;
-        if (status === "締結") group.closed++;
-        group.sumAmount += amount;
-        if (amount > group.maxAmount) group.maxAmount = amount;
-
-        group.details.push({
-          customerName: customerName,
-          mainText: mainText,
-          status: status,
-          amount: amount
-        });
-      });
-
-      staffList.forEach(staff => {
-        const g = statsContainer[staff];
-        g.rate = g.total > 0 ? ((g.closed / g.total) * 100).toFixed(1) : "0.0";
-        g.avgAmount = g.total > 0 ? Math.round(g.sumAmount / g.total) : 0;
-      });
-
-      globalConversionRes = {
-        data: statsContainer,
-        staffList: staffList,
-        updateDate: new Date().toLocaleDateString('zh-TW')
-      };
-
-      // 備份原始索引供手動分流指派
-      globalConversionRes.staffList.forEach(st => {
-        if(globalConversionRes.data[st]) {
-          globalConversionRes.data[st].originalDetails = [...globalConversionRes.data[st].details];
-          if (st.indexOf('未銷') !== -1 || st.indexOf('未指定') !== -1) {
-            globalConversionRes.data[st].details.forEach((d, dIdx) => {
-              d.fromSpecialStaff = st;
-              d.originalIndex = dIdx;
-            });
-          }
-        }
-      });
-
-      renderConversionStats(globalConversionRes);
-    }
-
-    // 3. 原生從 Supabase consultations 載入模式
-    async function loadConversionData() {
-      // 若當前有匯入檔案暫存，優先依目前日期區間重新運算匯入檔
-      if (cachedDepositRows.length > 0) {
-        processImportedPerformanceData();
-        return;
-      }
-
-      const s = document.getElementById('conversion-date-start').value;
-      const e = document.getElementById('conversion-date-end').value;
-      showMask('成效計算中 (Supabase)...');
-
-      try {
-        const { data, error } = await _supabase
-          .from('consultations')
-          .select('name, staff, care_staff, status, order_no, amount, sales_note, note, created_at')
-          .gte('created_at', `${s}T00:00:00`)
-          .lte('created_at', `${e}T23:59:59`);
-
-        if (error) throw error;
-
-        const statsContainer = {};
-        const staffList = [];
-
-        (data || []).forEach(row => {
-          const staffName = row.care_staff || row.staff || "未指定人員";
-          const customerName = row.name || "未登記";
-          const status = row.status || "待處理";
-          const mainText = (status === "締結") ? (row.order_no || row.sales_note || "無單號") : (row.note || "無");
-          const amount = parseFloat(row.amount) || 0;
-
-          if (!statsContainer[staffName]) {
-            statsContainer[staffName] = { total: 0, closed: 0, sumAmount: 0, maxAmount: 0, details: [] };
-            staffList.push(staffName);
-          }
-
-          const group = statsContainer[staffName];
-          group.total++;
-          if (status === "締結") group.closed++;
-          group.sumAmount += amount;
-          if (amount > group.maxAmount) group.maxAmount = amount;
-
-          group.details.push({
-            customerName: customerName,
-            mainText: mainText,
-            status: status,
-            amount: amount
-          });
-        });
-
-        staffList.forEach(staff => {
-          const g = statsContainer[staff];
-          g.rate = g.total > 0 ? ((g.closed / g.total) * 100).toFixed(1) : "0.0";
-          g.avgAmount = g.total > 0 ? Math.round(g.sumAmount / g.total) : 0;
-        });
-
-        globalConversionRes = {
-          data: statsContainer,
-          staffList: staffList,
-          updateDate: new Date().toLocaleDateString('zh-TW')
-        };
-
-        globalConversionRes.staffList.forEach(st => {
-          if(globalConversionRes.data[st]) {
-            globalConversionRes.data[st].originalDetails = [...globalConversionRes.data[st].details];
-            if (st.indexOf('未銷') !== -1 || st.indexOf('未指定') !== -1) {
-              globalConversionRes.data[st].details.forEach((d, dIdx) => {
-                d.fromSpecialStaff = st;
-                d.originalIndex = dIdx;
-              });
-            }
-          }
-        });
-
-        renderConversionStats(globalConversionRes);
-        hideMask();
-      } catch (e) {
-        hideMask();
-        alert("成效計算失敗: " + e.message);
-      }
     }
 
     window.reassignItem = function(sourceStaff, detailIndex, targetStaff, selectEl) {
@@ -2922,225 +3329,6 @@
       
       group.rate = group.total > 0 ? ((group.closed / group.total) * 100).toFixed(1) : "0.0";
       group.avgAmount = group.total > 0 ? Math.round(group.sumAmount / group.total) : 0;
-    }
-
-    function renderConversionStats(res) {
-      const currentScrollTop = window.scrollY || document.documentElement.scrollTop;
-
-      const openExternalStaffs = [];
-      const openInternalStaffs = [];
-      document.querySelectorAll('.mini-chart-box[data-staff]').forEach(box => {
-        const sName = box.getAttribute('data-staff');
-        const deElements = box.querySelectorAll('details');
-        if (deElements[0] && deElements[0].open) openExternalStaffs.push(sName);
-        if (deElements.length > 1) {
-          if (deElements[1] && deElements[1].open) openInternalStaffs.push(sName);
-        } else if (deElements[0] && deElements[0].open) {
-          openInternalStaffs.push(sName);
-        }
-      });
-
-      hideMask();
-      const container = document.getElementById('conversion-content');
-      if(!res.staffList || res.staffList.length === 0) { container.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:20px; color:#999;">此區間內無相符的紀錄資料</div>'; return; }
-
-      const sDate = document.getElementById('conversion-date-start').value.replace(/-/g, '/');
-      const eDate = document.getElementById('conversion-date-end').value.replace(/-/g, '/');
-
-      const sortedStaffList = [...res.staffList].sort((a, b) => {
-        const isSpecialA = (a.indexOf('未銷') !== -1 || a.indexOf('未指定') !== -1);
-        const isSpecialB = (b.indexOf('未銷') !== -1 || b.indexOf('未指定') !== -1);
-        return isSpecialA - isSpecialB; 
-      });
-
-      const normalStaffOptions = sortedStaffList.filter(s => s.indexOf('未銷') === -1 && s.indexOf('未指定') === -1);
-
-      let tableRowsHtml = '';
-      sortedStaffList.forEach((staff) => {
-        const item = res.data[staff];
-        const isSpecial = (staff.indexOf('未銷') !== -1 || staff.indexOf('未指定') !== -1);
-        const rowBgColor = isSpecial ? '#f1f3f4' : '#ffffff';
-        
-        tableRowsHtml += `
-          <tr style="border-bottom: 1px solid #eef1f2; font-size: 13px; color: #546e7a; background: ${rowBgColor};">
-            <td style="padding: 12px 10px; font-weight: bold; color: ${isSpecial ? '#78909c' : '#37474f'};">👤 ${staff}</td>
-            <td style="padding: 12px 10px; text-align: center; font-weight: bold; color: #2e7d32;">${item.total} / ${item.closed}</td>
-            <td style="padding: 12px 10px; text-align: center; color: #1976d2; font-weight: bold;">${item.rate}%</td>
-            <td style="padding: 12px 10px; text-align: right; font-weight: bold; color: #333;">$${item.sumAmount.toLocaleString()}</td>
-            <td style="padding: 12px 10px; text-align: right; color: #546e7a;">$${item.avgAmount.toLocaleString()}</td>
-            <td style="padding: 12px 10px; text-align: right; color: #ef6c00; font-weight: bold;">$${item.maxAmount.toLocaleString()}</td>
-          </tr>
-        `;
-      });
-
-      let html = `
-        <div class="mini-chart-box" id="conversion-master-summary-card" style="grid-column: 1 / -1; height: auto; display: block; padding: 24px; background: #ffffff; border: 1px solid #cfd8dc; box-shadow: 0 4px 12px rgba(0,0,0,0.05); border-radius: 12px; margin-bottom: 20px;">
-          <div class="box-header" style="border-bottom: 2px solid #b0bec5; padding-bottom: 14px; margin-bottom: 16px; align-items: center; justify-content: space-between; display: flex;">
-            <div class="box-title" style="font-size: 16px; color: #263238; display: flex; align-items: center; background: none; padding: 0; margin: 0;">
-              <span style="background: #eceff1; padding: 6px 14px; border-radius: 8px; font-weight: bold; color: #37474f;">📋 團隊締結成效業績總表</span>
-            </div>
-            <button onclick="shareMasterSummaryCard()" style="background: #00c300; color: white; border: none; padding: 7px 16px; border-radius: 20px; font-size: 13px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 6px rgba(0,195,0,0.3); display: inline-flex; align-items: center; gap: 4px; outline: none;">📸 匯出主管總表</button>
-          </div>
-          <div style="display: flex; gap: 15px; margin-bottom: 16px; font-size: 13px; color: #607d8b; flex-wrap: wrap; background: #f8f9fa; padding: 10px 14px; border-radius: 8px; border: 1px solid #edf0f2;">
-            <div>📅 <b>統計期間：</b>${sDate} ~ ${eDate}</div>
-            <div>🔄 <b>更新日期：</b>${res.updateDate || '無'}</div>
-          </div>
-          <div style="overflow-x: auto; width: 100%; margin-bottom: 10px;">
-            <table style="width: 100%; border-collapse: collapse; text-align: left; min-width: 580px;">
-              <thead>
-                <tr style="background: #f4f6f7; border-bottom: 2px solid #cfd8dc; font-size: 13px; color: #455a64;">
-                  <th style="padding: 10px; font-weight: bold;">服務人</th>
-                  <th style="padding: 10px; text-align: center; font-weight: bold;">總件 / 締結</th>
-                  <th style="padding: 10px; text-align: center; font-weight: bold;">締結率</th>
-                  <th style="padding: 10px; text-align: right; font-weight: bold;">總金額</th>
-                  <th style="padding: 10px; text-align: right; font-weight: bold;">平均金額</th>
-                  <th style="padding: 10px; text-align: right; font-weight: bold;">最高金額</th>
-                </tr>
-              </thead>
-              <tbody> ${tableRowsHtml} </tbody>
-            </table>
-          </div>
-          <div style="font-size: 12px; color: #90a4ae; text-align: center; font-weight: bold; margin-top: 15px; padding-top: 12px; border-top: 1px dashed #e0e0e0; letter-spacing: 0.5px; user-select: none;">
-            [紀錄皆為完銷後，或手動登記後列入統計]
-          </div>
-        </div>
-      `;
-
-      sortedStaffList.forEach((staff, index) => {
-        const item = res.data[staff];
-        const cardId = `conversion-card-${index}`;
-        const isSpecial = (staff.indexOf('未銷') !== -1 || staff.indexOf('未指定') !== -1);
-        const cardBgStyle = isSpecial ? 'background: #f5f7f8; border: 1px solid #dcdfe1; box-shadow: none;' : 'background: #ffffff; border: 1px solid #eee;';
-        
-        const isExtOpen = openExternalStaffs.includes(staff) ? 'open' : '';
-        const isInternalOpen = openInternalStaffs.includes(staff) ? 'open' : '';
-
-        const detailsHtml = item.details.map((d, dIdx) => {
-          const labelPrefix = d.status === '締結' ? `🧾 單號: ` : `💬 備註: `;
-          const rowBg = dIdx % 2 === 0 ? '#ffffff' : (isSpecial ? '#ebeded' : '#f7f9f8');
-          
-          let rightSideHtml = '';
-          if (d.amount > 0) {
-            rightSideHtml = `
-              <span style="color:${d.status === '締結' ? '#43a047' : '#ef5350'}; font-weight:bold;">${d.status || '未處理'}</span>
-              <span style="color:#333; font-weight:bold; min-width:60px; text-align:right;">$${d.amount.toLocaleString()}</span>
-            `;
-          } else {
-            const statusText = String(d.status || '').trim();
-            const displayText = statusText !== '' ? statusText : '未處理';
-            let labelStyle = 'font-weight:bold;';
-            if (displayText === '未處理') {
-              labelStyle += 'color:#78909c; background:#eceff1; padding:2px 8px; border-radius:4px; font-size:12px;';
-            } else if (displayText === '締結') {
-              labelStyle += 'color:#43a047;';
-            } else { labelStyle += 'color:#ef5350;'; }
-            rightSideHtml = `<span style="${labelStyle}">${displayText}</span>`;
-          }
-          
-          let assignSelectHtml = '';
-          if (isSpecial && normalStaffOptions.length > 0) {
-            assignSelectHtml = `
-              <select onchange="reassignItem('${staff}', ${dIdx}, this.value, this)" style="margin-top:4px; padding:3px 6px; font-size:12px; border-radius:4px; border:1px solid #cfd8dc; background:#fff; color:#455a64; outline:none; cursor:pointer;">
-                <option value="">🔄 歸類此單給...</option>
-                ${normalStaffOptions.map(opt => `<option value="${opt}" ${d.assignedTo === opt ? 'selected' : ''}>${opt}</option>`).join('')}
-              </select>
-            `;
-          } else if (!isSpecial && d.fromSpecialStaff) {
-            assignSelectHtml = `
-              <button onclick="returnToUnclassified('${d.fromSpecialStaff}', ${d.originalIndex}, this)" style="margin-top:4px; padding:3px 8px; font-size:11px; border-radius:4px; border:1px solid #ffcdd2; background:#fff2f2; color:#d32f2f; cursor:pointer; outline:none; font-weight:bold; display:inline-flex; align-items:center; gap:2px; transition:0.2s;">↩️ 退回未分類</button>
-            `;
-          }
-          
-          return `
-            <div class="conversion-detail-row" style="display:flex; justify-content:space-between; font-size:13px; padding:8px 12px; background:${rowBg}; border-radius:6px; margin-bottom:4px; align-items:center; flex-wrap:wrap; gap:12px;">
-              <div style="display:flex; flex-direction:column; gap:4px; flex:1; min-width:200px;">
-                <div style="color:#546e7a; font-weight:bold; word-break:break-all; line-height:1.4; display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
-                  <span style="background:#efebe9; color:#4e342e; padding:2px 6px; border-radius:4px; font-size:11px; flex-shrink:0; user-select:none;">👤 客戶: ${d.customerName || '未登記'}</span>
-                  <span style="font-size:13px; color:#546e7a;">${labelPrefix}${d.mainText || '無'}</span>
-                </div>
-                ${assignSelectHtml}
-              </div>
-              <div style="display:flex; align-items:center; gap:10px; flex-shrink:0;"> ${rightSideHtml} </div>
-            </div>
-          `;
-        }).join('');
-
-        html += `
-          <div class="mini-chart-box" id="${cardId}" data-staff="${staff}" style="grid-column: 1 / -1; height: auto; display:block; padding: 22px; ${cardBgStyle}">
-            <div class="box-header" style="border-bottom: 1px solid #f0f0f0; padding-bottom: 14px; margin-bottom:14px; align-items: center; flex-wrap: wrap; gap: 10px;">
-              <div class="box-title" style="font-size:15px; color:var(--primary-color); display:flex; align-items:center; flex-wrap:wrap; gap:5px; background:none; padding:0; margin:0;">
-                <span style="background:${isSpecial ? '#e4e8ea' : '#f4f7f6'}; padding:6px 12px; border-radius:8px; font-weight:bold; color: ${isSpecial ? '#546e7a' : 'inherit'};">👤 服務人：${staff}</span>
-                <span style="font-size:12px; color:#78909c; font-weight:normal; margin-left:8px; background:#f0f4f2; padding:2px 8px; border-radius:6px;">📅 ${sDate} ~ ${eDate}</span>
-              </div>
-              <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                <div class="box-total" style="background:#e3f2fd; color:#1976d2; font-size:14px; padding:5px 12px; border-radius:8px; margin:0;">
-                  綜合締結率：<b id="rate-text-${index}" style="font-size:16px;">${item.rate}%</b>
-                </div>
-                <span style="font-size:12px; color:#b76e00; background:#fff8e1; border:1px solid #ffe082; padding:5px 10px; border-radius:15px; font-weight:bold; white-space:nowrap; display:inline-flex; align-items:center; gap:3px;">
-                  🔄 更新日: ${res.updateDate || '無'}
-                </span>
-                <button onclick="shareConversionCard('${cardId}', '${staff}')" style="background:#00c300; color:white; border:none; padding:5px 12px; border-radius:15px; font-size:13px; font-weight:bold; cursor:pointer; box-shadow: 0 2px 5px rgba(0,195,0,0.2);">📸 分享</button>
-              </div>
-            </div>
-            
-            <details ${isExtOpen} style="border: 1px dashed #a5d6a7; border-radius:12px; background:#f4f9f5; padding:8px 14px; margin-bottom:15px; outline:none;">
-              <summary style="font-size:13px; color:#2e7d32; font-weight:bold; cursor:pointer; outline:none; user-select:none;">🛠️ 展開/收起：手動混入外部未登記數據擴充欄位</summary>
-              <div style="display:flex; gap:15px; margin-top:12px; flex-wrap:wrap; align-items:center;">
-                <div style="flex:1; min-width:240px; display:flex; align-items:center; gap:10px;">
-                  <label style="font-size:13px; color:#2e7d32; font-weight:bold; white-space:nowrap; margin:0;">➕ 加入未登記締結件數</label>
-                  <div style="position:relative; flex:1; display:flex; align-items:center;">
-                    <input type="text" inputmode="numeric" id="ext-closed-${index}" class="date-input" style="width:100%; height:36px; background:#ffffff; border-color:#c8e6c9; padding:0 28px 0 10px; margin:0; font-size:14px;" placeholder="0" oninput="this.value=this.value.replace(/[^0-9]/g,''); recalcConversion(${index}, ${item.total}, ${item.closed}, ${item.sumAmount}, ${item.maxAmount})">
-                    <button onclick="document.getElementById('ext-closed-${index}').value=''; recalcConversion(${index}, ${item.total}, ${item.closed}, ${item.sumAmount}, ${item.maxAmount});" style="position:absolute; right:6px; background:none; border:none; color:#ff8a80; cursor:pointer; font-size:14px; font-weight:bold; padding:2px 4px; outline:none;">✕</button>
-                  </div>
-                </div>
-                <div style="flex:1; min-width:240px; display:flex; align-items:center; gap:10px;">
-                  <label style="font-size:13px; color:#2e7d32; font-weight:bold; white-space:nowrap; margin:0;">加總外部總金額</label>
-                  <div style="position:relative; flex:1; display:flex; align-items:center;">
-                    <input type="text" inputmode="decimal" id="ext-amount-${index}" class="date-input" style="width:100%; height:36px; background:#ffffff; border-color:#c8e6c9; padding:0 28px 0 10px; margin:0; font-size:14px;" placeholder="0" oninput="this.value=this.value.replace(/[^0-9.]/g,''); recalcConversion(${index}, ${item.total}, ${item.closed}, ${item.sumAmount}, ${item.maxAmount})">
-                    <button onclick="document.getElementById('ext-amount-${index}').value=''; recalcConversion(${index}, ${item.total}, ${item.closed}, ${item.sumAmount}, ${item.maxAmount});" style="position:absolute; right:6px; background:none; border:none; color:#ff8a80; cursor:pointer; font-size:14px; font-weight:bold; padding:2px 4px; outline:none;">✕</button>
-                  </div>
-                </div>
-              </div>
-            </details>
-            
-            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap:12px; margin-bottom: 15px;">
-              <div style="background:${isSpecial ? '#e2ebd5' : '#e8f5e9'}; border: 1px solid ${isSpecial ? '#c0d6a4' : '#c8e6c9'}; padding:10px; border-radius:10px; text-align:center;">
-                <div style="font-size:12px; color:#2e7d32; font-weight:bold; margin-bottom:4px;">總件 / 締結</div>
-                <div id="count-text-${index}" style="font-size:16px; font-weight:bold; color:#1b5e20;">${item.total} / <span style="font-size:19px; color:#2e7d32; font-weight:900;">${item.closed}</span></div>
-              </div>
-              <div style="background:#ffffff; border: 1px solid #e0e0e0; padding:10px; border-radius:10px; text-align:center;">
-                <div style="font-size:12px; color:#78909c; margin-bottom:4px;">總金額</div>
-                <div id="sum-text-${index}" style="font-size:16px; font-weight:bold; color:#333;">$${item.sumAmount.toLocaleString()}</div>
-              </div>
-              <div style="background:#ffffff; border: 1px solid #e0e0e0; padding:10px; border-radius:10px; text-align:center;">
-                <div style="font-size:12px; color:#78909c; margin-bottom:4px;">平均金額</div>
-                <div id="avg-text-${index}" style="font-size:16px; font-weight:bold; color:#1976d2;">$${item.avgAmount.toLocaleString()}</div>
-              </div>
-              <div style="background:#ffffff; border: 1px solid #e0e0e0; padding:10px; border-radius:10px; text-align:center;">
-                <div style="font-size:12px; color:#78909c; margin-bottom:4px;">最高金額</div>
-                <div id="max-text-${index}" style="font-size:16px; font-weight:bold; color:#ef6c00;">$${item.maxAmount.toLocaleString()}</div>
-                <div style="font-size:11px; color:#90a4ae; margin-top:4px; font-weight:bold;">[僅顯示有登記紀錄]</div>
-              </div>
-            </div>
-            
-            <details ${isInternalOpen} style="border: 1px solid #eee; border-radius:10px; padding:6px 12px; background:#fff;">
-              <summary style="font-size:13px; color:#546e7d; font-weight:bold; cursor:pointer; outline:none; user-select:none;">📋 展開查看內部系統明細 (${item.total} 筆)</summary>
-              <div style="margin-top:10px; max-height:260px; overflow-y:auto; padding:5px; background:#ffffff; border-radius:8px;">
-                ${detailsHtml}
-              </div>
-            </details>
-          </div>
-        `;
-      });
-      
-      container.innerHTML = html;
-      
-      setTimeout(() => {
-        window.scrollTo({
-          top: currentScrollTop,
-          behavior: 'instant'
-        });
-      }, 80);
     }
 
     function shareMasterSummaryCard() {
