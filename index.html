@@ -9,6 +9,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
   <style>
     .style-no-spin::-webkit-outer-spin-button,
@@ -954,9 +955,26 @@
         <h2>醫師異動</h2>
       </div>
     </div>
-    <div class="sidebar-footer">
-      <button id="logout-btn" class="logout-btn btn-animate" onclick="logout(true)">安全登出</button>
+    <!-- 替換為 Supabase 免費額度監控面板 -->
+    <div class="sidebar-footer" style="padding: 15px; background: #fafbfc; border-top: 1px solid #edf2f7;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
+        <span style="font-size: 11px; font-weight: 800; color: #455a64; display:inline-flex; align-items:center; gap:3px;">
+          雲端額度
+        </span>
+        <span id="quota-percent-text" style="font-size: 11px; font-weight: bold; color: #1976d2;">0%</span>
+      </div>
+      
+      <!-- 進度條軌道 -->
+      <div style="width: 100%; height: 7px; background: #e2e8f0; border-radius: 10px; overflow: hidden; margin-bottom: 6px;">
+        <div id="quota-progress-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #43a047, #1976d2); border-radius: 10px; transition: width 0.6s ease;"></div>
+      </div>
+      
+      <div style="display:flex; justify-content:space-between; align-items:center; font-size: 10px; color: #78909c;">
+        <span id="quota-detail-text">資料庫載入中...</span>
+        <button onclick="checkSupabaseUsageQuota()" style="background:none; border:none; padding:0; color:#1976d2; cursor:pointer; font-size:10px; font-weight:bold;" title="重新檢查">🔄</button>
+      </div>
     </div>
+  </nav>
   </nav>
 
   <main id="main-content">
@@ -1085,14 +1103,24 @@
 
     <div id="conversion-container" class="container fade-in">
       <div class="filter-bar">
-        <div class="filter-title">📈 締結率服務成效統計</div>
-        <div style="display: flex; gap:10px; align-items: center; flex-wrap: wrap;">
-          <input type="date" id="conversion-date-start" class="date-input">
+        <div class="filter-title">📈 締結率服務成效統計 (支援業績檔案匯入)</div>
+        <div style="display: flex; gap:8px; align-items: center; flex-wrap: wrap;">
+          <input type="date" id="conversion-date-start" class="date-input" style="min-width:130px;">
           <span style="color:#aaa">~</span>
-          <input type="date" id="conversion-date-end" class="date-input">
-          <button class="btn-search btn-animate" onclick="loadConversionData()">刷新</button>
+          <input type="date" id="conversion-date-end" class="date-input" style="min-width:130px;">
+          <button class="btn-search btn-animate" onclick="loadConversionData()">查詢</button>
+          
+          <!-- 一次選取兩個 Excel/CSV 檔案按鈕 -->
+          <label class="btn-animate" style="background:#0288d1; color:white; padding:0 15px; height:45px; border-radius:12px; font-weight:bold; font-size:14px; display:inline-flex; align-items:center; gap:5px; cursor:pointer; margin:0;" title="支援一次選擇完銷檔與訂金檔">
+            📂 匯入業績雙檔 (.xlsx/.csv)
+            <input type="file" id="conversion-file-input" multiple accept=".xlsx,.xls,.csv" style="display:none;" onchange="handlePerformanceFilesUpload(this)">
+          </label>
+          <button id="btn-clear-imported-files" class="btn-animate" style="background:#ffebee; color:#c62828; border:1px solid #ffcdd2; height:45px; border-radius:12px; font-weight:bold; font-size:13px; padding:0 12px; display:none;" onclick="clearImportedPerformanceFiles()">✕ 清除匯入檔案</button>
         </div>
-        <div style="width: 100%; font-size:13px; color:#78909c; margin-top: 5px;">📊 數據來源自「諮詢記錄帶入」，以「紀錄時間」為日期篩選基準</div>
+        <div id="imported-files-status" style="width: 100%; font-size:12.5px; color:#2e7d32; font-weight:bold; margin-top: 4px; display:none;"></div>
+        <div style="width: 100%; font-size:12px; color:#78909c; margin-top: 2px;">
+          📊 比對邏輯：以訂金檔 (TempRpt_RSIRUnGet) 篩選日期區間，並以三聯單號比對完銷檔 (EC00EG_TempRpt__) 帶出銷售人；未銷單自動歸入未銷分類供手動指定。
+        </div>
       </div>
       <div id="conversion-content" class="chart-grid"></div>
     </div>
@@ -1131,6 +1159,7 @@
         }
 
         await refreshData();
+        checkSupabaseUsageQuota(); // 登入後自動執行容量監控
         goHome();
       } else {
         document.getElementById('login-screen').style.display = 'flex';
@@ -2320,6 +2349,8 @@
     }
 
     let globalConversionRes = null;
+    let cachedCompletedSalesMap = {}; // 暫存完銷檔單號對照表
+    let cachedDepositRows = [];        // 暫存訂金檔所有資料列
 
     function openConversion() {
       currentMode = 'conversion';
@@ -2327,17 +2358,281 @@
       
       const now = new Date();
       const lastMonth1st = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      const sStr = lastMonth1st.getFullYear() + '-' + String(lastMonth1st.getMonth() + 1).padStart(2, '0') + '-01';
-      const eStr = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+      const pad = n => String(n).padStart(2, '0');
+      const sStr = `${lastMonth1st.getFullYear()}-${pad(lastMonth1st.getMonth() + 1)}-01`;
+      const eStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
       
       document.getElementById('conversion-date-start').value = sStr;
       document.getElementById('conversion-date-end').value = eStr;
+
+      // 若已有匯入暫存檔，直接用匯入檔重算；否則向 Supabase 撈取
+      if (cachedDepositRows.length > 0) {
+        processImportedPerformanceData();
+      } else {
+        loadConversionData();
+      }
+    }
+
+    // 1. 處理使用者一次上傳多個檔案
+    async function handlePerformanceFilesUpload(input) {
+      const files = Array.from(input.files);
+      if (files.length === 0) return;
+
+      showMask('正在解析業績檔案...');
+
+      let completedFile = null;
+      let depositFile = null;
+
+      files.forEach(f => {
+        const name = f.name;
+        if (name.includes('EC00EG_TempRpt__') || name.includes('完銷')) {
+          completedFile = f;
+        } else if (name.includes('TempRpt_RSIRUnGet') || name.includes('訂金')) {
+          depositFile = f;
+        }
+      });
+
+      if (!completedFile && !depositFile) {
+        hideMask();
+        alert("⚠️ 檔案名稱需包含「EC00EG_TempRpt__」(完銷檔) 或「TempRpt_RSIRUnGet」(訂金檔)！");
+        return;
+      }
+
+      try {
+        if (completedFile) {
+          const compData = await parseExcelOrCsv(completedFile);
+          cachedCompletedSalesMap = {};
+          compData.forEach((row, idx) => {
+            if (idx === 0) return;
+            const orderNo = String(row[16] || '').trim();
+            const amount = parseFloat(row[5]) || 0;
+            const staffName = String(row[6] || '').trim();
+            if (orderNo) {
+              if (!cachedCompletedSalesMap[orderNo]) {
+                cachedCompletedSalesMap[orderNo] = { staff: staffName, totalAmount: 0 };
+              }
+              cachedCompletedSalesMap[orderNo].totalAmount += amount;
+              if (staffName && !cachedCompletedSalesMap[orderNo].staff) {
+                cachedCompletedSalesMap[orderNo].staff = staffName;
+              }
+            }
+          });
+        }
+
+        if (depositFile) {
+          const depData = await parseExcelOrCsv(depositFile);
+          cachedDepositRows = depData.slice(1);
+        }
+
+        const statusEl = document.getElementById('imported-files-status');
+        const clearBtn = document.getElementById('btn-clear-imported-files');
+        if (statusEl) {
+          statusEl.style.display = 'block';
+          statusEl.innerText = `✅ 已匯入：${completedFile ? completedFile.name : ''} ｜ ${depositFile ? depositFile.name : ''}`;
+        }
+        if (clearBtn) clearBtn.style.display = 'inline-block';
+
+        processImportedPerformanceData();
+        hideMask();
+      } catch (err) {
+        hideMask();
+        alert("檔案讀取失敗: " + err.message);
+      }
+    }
+
+    // 清除已匯入檔案並重置為 Supabase 查詢
+    function clearImportedPerformanceFiles() {
+      cachedCompletedSalesMap = {};
+      cachedDepositRows = [];
+
+      const fileInput = document.getElementById('conversion-file-input');
+      const statusEl = document.getElementById('imported-files-status');
+      const clearBtn = document.getElementById('btn-clear-imported-files');
+
+      if (fileInput) fileInput.value = '';
+      if (statusEl) { statusEl.innerText = ''; statusEl.style.display = 'none'; }
+      if (clearBtn) clearBtn.style.display = 'none';
+
+      alert("已清除匯入之檔案，系統已切回 Supabase 即時查詢！");
       loadConversionData();
     }
 
+    // ================= Supabase 免費 500MB 資料量與資料筆數監控 =================
+    async function checkSupabaseUsageQuota() {
+      const progressBar = document.getElementById('quota-progress-bar');
+      const percentText = document.getElementById('quota-percent-text');
+      const detailText = document.getElementById('quota-detail-text');
+
+      if (!progressBar || !percentText || !detailText) return;
+
+      detailText.innerText = "統計容量中...";
+
+      try {
+        // 批次向 Supabase 抓取各核心資料表的總記錄筆數
+        const [
+          { count: consultCount },
+          { count: handoverCount },
+          { count: childCount },
+          { count: docChangeCount },
+          { count: taskCount }
+        ] = await Promise.all([
+          _supabase.from('consultations').select('*', { count: 'exact', head: true }),
+          _supabase.from('handovers').select('*', { count: 'exact', head: true }),
+          _supabase.from('children_control').select('*', { count: 'exact', head: true }),
+          _supabase.from('doctor_shift_changes').select('*', { count: 'exact', head: true }),
+          _supabase.from('task_configs').select('*', { count: 'exact', head: true })
+        ]);
+
+        const totalRows = (consultCount || 0) + (handoverCount || 0) + (childCount || 0) + (docChangeCount || 0) + (taskCount || 0);
+
+        // 估算：Supabase 免費版資料庫上限為 500 MB (約可容納 20 萬筆常規文字與帶壓縮圖檔資料)
+        // 以 200,000 筆為進度條基準刻度
+        const MAX_CAPACITY_ROWS = 200000;
+        const usedPercent = Math.min(100, Math.max(1, ((totalRows / MAX_CAPACITY_ROWS) * 100))).toFixed(1);
+        
+        // 粗估容量 (以每千筆約 2.5MB 計算)
+        const estimatedMB = ((totalRows * 2.5) / 1000).toFixed(1);
+
+        progressBar.style.width = `${usedPercent}%`;
+        percentText.innerText = `${usedPercent}%`;
+        detailText.innerText = `約 ${estimatedMB}MB / 500MB (${totalRows}筆)`;
+
+        // 容量超過 80% 時切換警示色彩
+        if (parseFloat(usedPercent) > 80) {
+          progressBar.style.background = 'linear-gradient(90deg, #f57c00, #d32f2f)';
+          percentText.style.color = '#d32f2f';
+        } else {
+          progressBar.style.background = 'linear-gradient(90deg, #43a047, #1976d2)';
+          percentText.style.color = '#1976d2';
+        }
+      } catch (err) {
+        detailText.innerText = "無法取得額度狀態";
+        console.error("檢查 Supabase 容量失敗:", err);
+      }
+    }
+
+    // 輔助函式：將 File 物件透過 XLSX 轉為二維陣列
+    function parseExcelOrCsv(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          try {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+            const firstSheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[firstSheetName];
+            const jsonSheet = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+            resolve(jsonSheet);
+          } catch (ex) {
+            reject(ex);
+          }
+        };
+        reader.onerror = reject;
+        reader.readAsArrayBuffer(file);
+      });
+    }
+
+    // 2. 依日期區間交叉比對雙檔並產生成效結構
+    function processImportedPerformanceData() {
+      const s = document.getElementById('conversion-date-start').value;
+      const e = document.getElementById('conversion-date-end').value;
+      const startDate = new Date(s); startDate.setHours(0,0,0,0);
+      const endDate = new Date(e); endDate.setHours(23,59,59,999);
+
+      if (cachedDepositRows.length === 0) {
+        alert("尚未匯入訂金檔 (TempRpt_RSIRUnGet)，請先點選匯入！");
+        return;
+      }
+
+      const statsContainer = {};
+      const staffList = [];
+
+      cachedDepositRows.forEach(row => {
+        // A 欄 (索引 0): 日期
+        const rawDateStr = String(row[0] || '').trim().replace(/\//g, '-');
+        if (!rawDateStr) return;
+        const rowDate = new Date(rawDateStr);
+        if (isNaN(rowDate.getTime()) || rowDate < startDate || rowDate > endDate) return;
+
+        // Y 欄 (索引 24): 三聯單號
+        const orderNo = String(row[24] || '').trim();
+        // C 欄 (索引 2): 客戶名
+        const customerName = String(row[2] || '未登記').trim();
+        // O 欄 (索引 14): 訂金/交易金額
+        const amount = parseFloat(row[14]) || 0;
+
+        // 向 1 檔比對銷售人
+        let matchedStaff = "";
+        let isCompleted = false;
+
+        if (orderNo && cachedCompletedSalesMap[orderNo]) {
+          matchedStaff = cachedCompletedSalesMap[orderNo].staff;
+          isCompleted = true;
+        }
+
+        // 若比對不到銷售人，歸入「未銷貨/未指定」
+        const staffName = matchedStaff ? matchedStaff : "未銷貨/未指定人員";
+        const status = isCompleted ? "締結" : "待處理";
+        const mainText = orderNo ? orderNo : "無單號";
+
+        if (!statsContainer[staffName]) {
+          statsContainer[staffName] = { total: 0, closed: 0, sumAmount: 0, maxAmount: 0, details: [] };
+          staffList.push(staffName);
+        }
+
+        const group = statsContainer[staffName];
+        group.total++;
+        if (status === "締結") group.closed++;
+        group.sumAmount += amount;
+        if (amount > group.maxAmount) group.maxAmount = amount;
+
+        group.details.push({
+          customerName: customerName,
+          mainText: mainText,
+          status: status,
+          amount: amount
+        });
+      });
+
+      staffList.forEach(staff => {
+        const g = statsContainer[staff];
+        g.rate = g.total > 0 ? ((g.closed / g.total) * 100).toFixed(1) : "0.0";
+        g.avgAmount = g.total > 0 ? Math.round(g.sumAmount / g.total) : 0;
+      });
+
+      globalConversionRes = {
+        data: statsContainer,
+        staffList: staffList,
+        updateDate: new Date().toLocaleDateString('zh-TW')
+      };
+
+      // 備份原始索引供手動分流指派
+      globalConversionRes.staffList.forEach(st => {
+        if(globalConversionRes.data[st]) {
+          globalConversionRes.data[st].originalDetails = [...globalConversionRes.data[st].details];
+          if (st.indexOf('未銷') !== -1 || st.indexOf('未指定') !== -1) {
+            globalConversionRes.data[st].details.forEach((d, dIdx) => {
+              d.fromSpecialStaff = st;
+              d.originalIndex = dIdx;
+            });
+          }
+        }
+      });
+
+      renderConversionStats(globalConversionRes);
+    }
+
+    // 3. 原生從 Supabase consultations 載入模式
     async function loadConversionData() {
-      const s = document.getElementById('conversion-date-start').value, e = document.getElementById('conversion-date-end').value;
-      showMask('成效計算中...');
+      // 若當前有匯入檔案暫存，優先依目前日期區間重新運算匯入檔
+      if (cachedDepositRows.length > 0) {
+        processImportedPerformanceData();
+        return;
+      }
+
+      const s = document.getElementById('conversion-date-start').value;
+      const e = document.getElementById('conversion-date-end').value;
+      showMask('成效計算中 (Supabase)...');
 
       try {
         const { data, error } = await _supabase
@@ -2380,7 +2675,7 @@
         staffList.forEach(staff => {
           const g = statsContainer[staff];
           g.rate = g.total > 0 ? ((g.closed / g.total) * 100).toFixed(1) : "0.0";
-          g.avgAmount = g.total > 0 ? Math.round(group.sumAmount / group.total) : 0;
+          g.avgAmount = g.total > 0 ? Math.round(g.sumAmount / g.total) : 0;
         });
 
         globalConversionRes = {
