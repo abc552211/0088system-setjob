@@ -1210,6 +1210,7 @@
           
           applyPermissions(userPermissions); 
           await refreshData(); 
+          checkSupabaseUsageQuota(); // 登入完成立即執行額度進度條統計
           setupInactivityTimer(); 
           resetIdleTimer();
           goHome();
