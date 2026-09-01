@@ -417,14 +417,13 @@
       cursor: pointer;
     }
 
-    /* 緊湊精緻排版：降低高度與內距，視野倍增 */
     .row-input {
       display: flex;
       flex-direction: row;
       flex-wrap: nowrap;
-      gap: 8px;
-      margin-bottom: 6px;
-      padding: 8px 12px;
+      gap: 12px;
+      margin-bottom: 8px;
+      padding: 10px 14px;
       border-radius: 10px;
       background: white;
       border: 1px solid #e2e8f0;
@@ -436,61 +435,86 @@
     .row-input.has-content {
       background-color: #fbfcfa;
       border-color: #c5e1a5;
-      border-left: 4px solid #8bc34a;
+      border-left: 5px solid #8bc34a;
     }
 
     .row-input-title {
-      min-width: 85px;
+      min-width: 90px;
       font-weight: bold;
-      font-size: 13px;
+      font-size: 13.5px;
       flex-shrink: 0;
     }
 
     .input-wrapper {
       flex: 3;
-      min-width: 140px;
+      min-width: 160px;
     }
 
     .input-wrapper input {
       width: 100%;
-      height: 34px;
-      padding: 0 10px;
+      height: 36px;
+      padding: 0 12px;
       border: 1px solid #cbd5e0;
       border-radius: 6px;
       font-size: 13px;
       outline: none;
+      box-sizing: border-box;
     }
 
     .input-wrapper input:focus {
       border-color: #3182ce;
+      box-shadow: 0 0 0 2px rgba(49, 130, 206, 0.15);
     }
 
+    /* 獨立且間距舒適的下拉與操作控制區 */
     .select-group {
       flex: 2;
       display: flex;
       align-items: center;
-      gap: 6px;
+      justify-content: flex-end;
+      gap: 10px;
       flex-shrink: 0;
     }
 
-    select {
-      height: 34px;
-      padding: 0 6px;
+    .select-group select {
+      height: 36px;
+      padding: 0 8px;
       border: 1px solid #cbd5e0;
       border-radius: 6px;
-      font-size: 12px;
+      font-size: 13px;
       outline: none;
       background: #ffffff;
+      min-width: 80px;
+    }
+
+    .assign-checkbox-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 12.5px;
+      color: #4a5568;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      user-select: none;
+      padding: 4px 8px;
+      background: #f7fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+    }
+
+    .assign-checkbox-label:hover {
+      background: #edf2f7;
     }
 
     .btn-reset {
-      width: 34px;
-      height: 34px;
+      width: 36px;
+      height: 36px;
       background: #fff1f1;
       color: #ff8a80;
       border: 1px solid #ffcdd2;
       border-radius: 6px;
-      font-size: 13px;
+      font-size: 14px;
       cursor: pointer;
       display: flex;
       align-items: center;
@@ -498,6 +522,10 @@
       flex-shrink: 0;
     }
 
+    .btn-reset:hover {
+      background: #ffebee;
+      color: #c62828;
+    }
     .assign-checkbox-label {
       display: inline-flex;
       align-items: center;
@@ -1302,35 +1330,38 @@
         }
       }
 
-      // 3. 人員指派設定 (純連動：只顯示週/月工作有勾選📌指派之項目)
+      // 3. 人員指派設定 (純連動：依工作內容去重合併，相同內容只顯示一列)
       else if (mode === 'assign') {
-        // 從目前的記憶體或資料庫取得所有被勾選需指派的工作
-        const assignedList = [];
+        const uniqueTaskMap = new Map();
 
-        // 納入週工作需指派項目
+        // 納入週工作需指派項目（以純 content 去重）
         (allData.weekly || []).filter(w => w.needAssign && w.content).forEach(w => {
-          const key = `[週] ${w.title}：${w.content}`;
-          // 比對既有的指派人
-          const existAssign = (allData.assign || []).find(a => a.title === key);
-          assignedList.push({
-            title: key,
-            executor: existAssign ? existAssign.executor : (w.executor !== '全員' ? w.executor : ''),
-            order: existAssign ? existAssign.order : 99
-          });
+          const cleanContent = w.content.trim();
+          if (!uniqueTaskMap.has(cleanContent)) {
+            const existAssign = (allData.assign || []).find(a => a.title === cleanContent || a.title.includes(cleanContent));
+            uniqueTaskMap.set(cleanContent, {
+              title: cleanContent,
+              executor: existAssign ? existAssign.executor : (w.executor !== '全員' ? w.executor : ''),
+              order: existAssign ? existAssign.order : 99
+            });
+          }
         });
 
-        // 納入月工作需指派項目
+        // 納入月工作需指派項目（以純 content 去重）
         (allData.monthly || []).filter(m => m.needAssign && m.content).forEach(m => {
-          const key = `[月] ${m.title}：${m.content}`;
-          const existAssign = (allData.assign || []).find(a => a.title === key);
-          assignedList.push({
-            title: key,
-            executor: existAssign ? existAssign.executor : (m.executor !== '全員' ? m.executor : ''),
-            order: existAssign ? existAssign.order : 99
-          });
+          const cleanContent = m.content.trim();
+          if (!uniqueTaskMap.has(cleanContent)) {
+            const existAssign = (allData.assign || []).find(a => a.title === cleanContent || a.title.includes(cleanContent));
+            uniqueTaskMap.set(cleanContent, {
+              title: cleanContent,
+              executor: existAssign ? existAssign.executor : (m.executor !== '全員' ? m.executor : ''),
+              order: existAssign ? existAssign.order : 99
+            });
+          }
         });
 
-        // 依照順序排序
+        const assignedList = Array.from(uniqueTaskMap.values());
+        // 依照自訂順序排序
         assignedList.sort((a, b) => a.order - b.order);
 
         const tipBar = document.createElement('div');
@@ -1372,26 +1403,96 @@
       }
     }
 
-    // 產生子項目單列 HTML
     function createSubTaskRowHtml(category, dayTitle, content = '', priority = '中', needAssign = false) {
       return `
-        <div class="sub-task-row row-input ${content ? 'has-content' : ''}" style="margin-top:6px; margin-bottom:4px;">
-          <div class="input-wrapper" style="flex:3;">
-            <input type="text" class="task-content-input" value="${content || ''}" placeholder="請輸入任務內容...">
+        <div class="sub-task-row row-input ${content ? 'has-content' : ''}">
+          <div class="input-wrapper">
+            <input type="text" class="task-content-input" value="${content || ''}" placeholder="請輸入任務內容..." oninput="markAsDirty()">
           </div>
-          <div class="select-group" style="flex:1.2; justify-content:flex-end;">
-            <select class="imp-select" style="height:32px;">
+          <div class="select-group">
+            <select class="imp-select" onchange="markAsDirty()">
               <option value="低" ${priority==='低'?'selected':''}>低</option>
               <option value="中" ${priority==='中'||!priority?'selected':''}>中</option>
               <option value="高" ${priority==='高'?'selected':''}>高</option>
             </select>
             <label class="assign-checkbox-label" title="勾選後整月份皆移至人員指派指派專人">
-              <input type="checkbox" class="need-assign-checkbox" ${needAssign?'checked':''}> 📌指派
+              <input type="checkbox" class="need-assign-checkbox" ${needAssign?'checked':''} onchange="markAsDirty()"> 📌指派
             </label>
             <button type="button" class="btn-reset btn-animate" onclick="removeSubTaskRow(this)" title="刪除此項">🗑️</button>
           </div>
         </div>
       `;
+    }
+
+    async function processSave() { 
+      if (!currentMode) return; 
+      showMask('儲存至 Supabase...'); 
+      
+      let insertRows = [];
+
+      if (currentMode === 'weekly' || currentMode === 'monthly') {
+        const cards = Array.from(document.querySelectorAll('#list-content .mini-chart-box'));
+        let globalOrder = 1;
+
+        cards.forEach(card => {
+          const dayTitle = card.dataset.dayTitle || '';
+          const rows = card.querySelectorAll('.sub-task-row');
+
+          rows.forEach(row => {
+            const contentVal = row.querySelector('.task-content-input').value.trim();
+            const priorityVal = row.querySelector('.imp-select').value || '中';
+            const needAssign = row.querySelector('.need-assign-checkbox').checked;
+
+            if (contentVal) {
+              insertRows.push({
+                category: currentMode,
+                item_order: globalOrder++,
+                title: dayTitle,
+                content: contentVal,
+                priority: priorityVal,
+                executor: '全員',
+                need_assign: needAssign
+              });
+            }
+          });
+        });
+      } else if (currentMode === 'assign') {
+        const rows = Array.from(document.querySelectorAll('#assign-list-rows .row-input'));
+        rows.forEach((row, idx) => {
+          const titleVal = row.querySelector('.assign-title-input').value.trim();
+          const execVal = row.querySelector('.exec-select').value;
+          if (titleVal) {
+            insertRows.push({
+              category: 'assign',
+              item_order: idx + 1,
+              title: titleVal,
+              content: '',
+              priority: '中',
+              executor: execVal || '未指派',
+              need_assign: true
+            });
+          }
+        });
+      }
+
+      try {
+        await _supabase.from('task_configs').delete().eq('category', currentMode);
+        
+        if (insertRows.length > 0) {
+          const { error } = await _supabase.from('task_configs').insert(insertRows);
+          if (error) throw error;
+        }
+
+        hasUnsavedChanges = false; // 儲存成功，清除未儲存狀態
+        await refreshData();
+        hideMask();
+
+        // 彈出明確儲存成功提示
+        alert("🎉 工作任務設定已成功儲存！");
+      } catch (e) {
+        hideMask();
+        alert("❌ 儲存失敗: " + e.message);
+      }
     }
 
     // 動態新增子項目
@@ -1428,80 +1529,31 @@
       }
     }
 
-    // 儲存至 Supabase task_configs
-    async function processSave() { 
-      if (!currentMode) return; 
-      showMask('儲存至 Supabase...'); 
-      
-      let insertRows = [];
-
-      // 1. 儲存週/月工作（遍歷每日卡片中的所有子任務列）
-      if (currentMode === 'weekly' || currentMode === 'monthly') {
-        const cards = Array.from(document.querySelectorAll('#list-content .mini-chart-box'));
-        let globalOrder = 1;
-
-        cards.forEach(card => {
-          const dayTitle = card.dataset.dayTitle || '';
-          const rows = card.querySelectorAll('.sub-task-row');
-
-          rows.forEach(row => {
-            const contentVal = row.querySelector('.task-content-input').value.trim();
-            const priorityVal = row.querySelector('.imp-select').value || '中';
-            const needAssign = row.querySelector('.need-assign-checkbox').checked;
-
-            if (contentVal) {
-              insertRows.push({
-                category: currentMode,
-                item_order: globalOrder++,
-                title: dayTitle,
-                content: contentVal,
-                priority: priorityVal,
-                executor: '全員',
-                need_assign: needAssign
-              });
-            }
-          });
-        });
-      }
-
-      // 2. 儲存人員指派（儲存指派同仁與順序）
-      else if (currentMode === 'assign') {
-        const rows = Array.from(document.querySelectorAll('#assign-list-rows .row-input'));
-        rows.forEach((row, idx) => {
-          const titleVal = row.querySelector('.assign-title-input').value.trim();
-          const execVal = row.querySelector('.exec-select').value;
-          if (titleVal) {
-            insertRows.push({
-              category: 'assign',
-              item_order: idx + 1,
-              title: titleVal,
-              content: '',
-              priority: '中',
-              executor: execVal || '未指派',
-              need_assign: true
-            });
-          }
-        });
-      }
-
-      try {
-        await _supabase.from('task_configs').delete().eq('category', currentMode);
-        
-        if (insertRows.length > 0) {
-          const { error } = await _supabase.from('task_configs').insert(insertRows);
-          if (error) throw error;
-        }
-
-        await refreshData();
-        showMask('儲存成功！'); 
-        setTimeout(hideMask, 800);
-      } catch (e) {
-        hideMask();
-        alert("儲存失敗: " + e.message);
-      }
-    }
     
+    
+    let hasUnsavedChanges = false; // 紀錄是否有未儲存的異動
+
+    // 關閉或重整瀏覽器分頁時的防呆提示
+    window.addEventListener('beforeunload', (e) => {
+      if (hasUnsavedChanges) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    });
+
+    function markAsDirty() {
+      hasUnsavedChanges = true;
+    }
+
     function switchContainer(targetId, navBtnId, title) {
+      // 若有未儲存的變更，提示確認
+      if (hasUnsavedChanges) {
+        if (!confirm("⚠️ 您有尚未儲存的任務變更，確定要離開嗎？\n（未儲存的內容將會遺失）")) {
+          return false;
+        }
+        hasUnsavedChanges = false;
+      }
+
       document.querySelectorAll('.menu-card').forEach(el => el.classList.remove('active'));
       if (navBtnId) {
         const btn = document.getElementById(navBtnId);
@@ -1518,24 +1570,40 @@
       
       document.getElementById(targetId).style.display = 'block';
       if(title) document.getElementById('mobile-title').innerText = title;
+      return true;
     }
 
     function openWork(mode) { 
-      currentMode = mode; 
+      if (currentMode === mode && document.getElementById('work-container').style.display === 'block') return;
+
       let title = mode === 'weekly' ? '(週)工作設定' : (mode === 'monthly' ? '(月)工作設定' : '人員指派');
+      if (!switchContainer('work-container', 'btn-' + mode, title)) return;
+
+      currentMode = mode; 
       document.getElementById('work-title').innerText = `📝 ${title}`;
-      switchContainer('work-container', 'btn-' + mode, title);
       renderList(mode); 
+      hasUnsavedChanges = false; // 剛切入載入初始資料，重置未儲存標記
     }
     
     async function openStats() { 
       currentMode = 'stats'; 
       showMask('載入統計...'); 
       try {
-        const { data, error } = await _supabase.from('consultations').select('staff, status, care_staff, care_time, created_at');
+        // 1. 同步取得在職員工清單與諮詢紀錄
+        const [
+          { data: staffData },
+          { data: consultData, error }
+        ] = await Promise.all([
+          _supabase.from('system_settings').select('value').eq('key', 'staff_list').single(),
+          _supabase.from('consultations').select('staff, status, care_staff, care_time, created_at')
+        ]);
+
         if (error) throw error;
 
-        const list = data || [];
+        // 取得有效追蹤在職員工清單（排除全員與空值）
+        const activeStaffList = (staffData && staffData.value) ? staffData.value.filter(s => s && s !== '全員') : [];
+        const list = consultData || [];
+        
         let earliestDate = "無資料";
         if (list.length > 0) {
           const dates = list.map(r => new Date(r.created_at)).filter(d => !isNaN(d.getTime()));
@@ -1545,19 +1613,29 @@
           }
         }
 
+        // 2. 初始化只包含在職員工的 Map
         const staffMap = {};
+        activeStaffList.forEach(s => {
+          staffMap[s] = { total: 0, care: 0, closed: 0, lastCare: "無紀錄" };
+        });
+
+        // 3. 僅統計在職人員的資料（已離職人員自動忽略跳過）
         list.forEach(r => {
-          const staff = r.staff || "未指定";
-          if (!staffMap[staff]) staffMap[staff] = { total: 0, care: 0, closed: 0, lastCare: "無紀錄" };
-          staffMap[staff].total++;
-          if (r.status === '已關懷') staffMap[staff].care++;
-          if (r.status && r.status !== '待處理' && r.status !== '已關懷') staffMap[staff].closed++;
-          if (r.care_time) {
-            staffMap[staff].lastCare = r.care_time.replace('T', ' ').substring(0, 10);
+          const staff = (r.staff || "").trim();
+          
+          // 判定：若該筆資料的服務人不在 activeStaffList 內，直接略過不計
+          if (activeStaffList.includes(staff)) {
+            staffMap[staff].total++;
+            if (r.status === '已關懷') staffMap[staff].care++;
+            if (r.status && r.status !== '待處理' && r.status !== '已關懷') staffMap[staff].closed++;
+            if (r.care_time) {
+              staffMap[staff].lastCare = r.care_time.replace('T', ' ').substring(0, 10);
+            }
           }
         });
 
-        statsData = Object.keys(staffMap).map(s => [
+        // 4. 組裝統計陣列
+        statsData = activeStaffList.map(s => [
           s,
           staffMap[s].total,
           staffMap[s].care,
@@ -1756,13 +1834,14 @@
     }
 
     async function loadMyopiaData() {
-      showMask('數據分析中...');
+      showMask('正在分析兒控大檔 (children_control)...');
       try {
         const { data, error } = await _supabase.from('children_control').select('*');
         if (error) throw error;
 
         const list = data || [];
-        const currentRocYear = new Date().getFullYear() - 1911;
+        const currentFullYear = new Date().getFullYear();
+        const currentRocYear = currentFullYear - 1911;
 
         const stats = {
           total: { OK: 0, Defocus: 0, Soft: 0 },
@@ -1779,26 +1858,74 @@
         for (let i = 0; i <= 100; i++) stats.age[i] = initAgeObj();
         stats.age["Other"] = initAgeObj();
 
+        // 關鍵字比對清單 (自動轉大寫以防大小寫不一致)
+        const okKeywords = ['塑型', 'OK', '一代', '二代', '三代', '標準', '優克', 'DF1', 'BF'];
+        const defocusKeywords = ['HOYA', '星趣', '離焦大片', '離焦'];
+        const softKeywords = ['酷柏', '軟控', 'MISIGHT', '軟'];
+
         list.forEach(r => {
-          let pType = 'OK';
-          const prod = r.product || '';
-          if (prod.includes('離焦') || prod.includes('Defocus')) pType = 'Defocus';
-          else if (prod.includes('軟') || prod.includes('Soft')) pType = 'Soft';
+          const prodRaw = String(r.product || '').trim();
+          const prodUpper = prodRaw.toUpperCase();
 
-          const isActive = (r.is_active !== false);
+          let pType = null;
+
+          // 1. 依指定關鍵字精確配對
+          if (okKeywords.some(k => prodUpper.includes(k.toUpperCase()))) {
+            pType = 'OK';
+          } else if (defocusKeywords.some(k => prodUpper.includes(k.toUpperCase()))) {
+            pType = 'Defocus';
+          } else if (softKeywords.some(k => prodUpper.includes(k.toUpperCase()))) {
+            pType = 'Soft';
+          } else {
+            // 若皆未匹配，預設歸入 OK
+            pType = 'OK';
+          }
+
+          // 2. 判斷使用中 / 停止更新狀態
+          const isExplicitStop = (r.is_active === false || String(r.status || '').includes('停') || String(r.result || '').includes('停'));
+          const daysVal = parseInt(r.days_not_back, 10);
+          const isOverYearNotBack = !isNaN(daysVal) && daysVal > 365;
+          const isActive = !(isExplicitStop || isOverYearNotBack);
+
           stats.total[pType]++;
-          if (isActive) stats.status[pType].active++;
-          else stats.status[pType].stop++;
+          if (isActive) {
+            stats.status[pType].active++;
+          } else {
+            stats.status[pType].stop++;
+          }
 
-          const days = parseInt(r.days_not_back) || 0;
-          if (days <= 90) stats.days.safe++;
-          else if (days <= 120) stats.days.warn++;
-          else stats.days.danger++;
+          // 3. 未回診天數分段警示
+          if (!isNaN(daysVal)) {
+            if (daysVal <= 90) stats.days.safe++;
+            else if (daysVal <= 120) stats.days.warn++;
+            else stats.days.danger++;
+          } else {
+            stats.days.safe++;
+          }
 
+          // 4. 年齡精確換算
           let age = "Other";
-          if (r.birthday && r.birthday.includes('/')) {
-            const bYear = parseInt(r.birthday.split('/')[0]);
-            if (!isNaN(bYear)) age = Math.max(0, currentRocYear - bYear);
+          const birthStr = String(r.birthday || '').trim();
+          
+          if (birthStr) {
+            let birthYear = NaN;
+            if (birthStr.includes('/') || birthStr.includes('-')) {
+              const parts = birthStr.split(/[/-]/);
+              const yVal = parseInt(parts[0], 10);
+              if (!isNaN(yVal)) {
+                birthYear = (yVal > 1900) ? (currentFullYear - yVal) : (currentRocYear - yVal);
+              }
+            } else if (birthStr.length === 7 && !isNaN(birthStr)) {
+              const yVal = parseInt(birthStr.substring(0, 3), 10);
+              birthYear = currentRocYear - yVal;
+            } else if (birthStr.length === 8 && !isNaN(birthStr)) {
+              const yVal = parseInt(birthStr.substring(0, 4), 10);
+              birthYear = currentFullYear - yVal;
+            }
+
+            if (!isNaN(birthYear) && birthYear >= 0 && birthYear <= 100) {
+              age = birthYear;
+            }
           }
 
           if (stats.age[age]) {
@@ -1810,7 +1937,7 @@
         renderMyopiaCharts(stats);
       } catch (e) {
         hideMask();
-        alert("兒控分析失敗: " + e.message);
+        alert("兒控大檔統計失敗: " + e.message);
       }
     }
 
@@ -2784,7 +2911,7 @@
     }
 
     
-    function openDoctor() { window.open("https://script.google.com/macros/s/AKfycbwptFdFQBWhJyMwdPfY8XJoTrFnBaqJuqUnbFCB0DexULL1egaZqMUeBfYCjp-cyp1j/exec", '_blank'); }
+    function openDoctor() { window.open("https://088doctor.abc552211.workers.dev/", '_blank'); }
   </script>
 </body>
 
