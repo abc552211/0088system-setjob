@@ -1,0 +1,2791 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>工作任務維護與數據分析系統</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+
+  <style>
+    .style-no-spin::-webkit-outer-spin-button,
+    .style-no-spin::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+
+    .style-no-spin {
+      -moz-appearance: textfield;
+    }
+
+    :root {
+      --primary-color: #455a64;
+      --accent-color: #43a047;
+      --error-color: #ef5350;
+      --bg-color: #f4f7f6;
+      --sidebar-bg: #ffffff;
+      --touch-height: 52px;
+      --placeholder-color: #adb5bd;
+      --sidebar-width: 260px;
+      --bottom-nav-height: 70px;
+    }
+
+    body {
+      font-family: "Microsoft JhengHei", -apple-system, BlinkMacSystemFont, sans-serif;
+      background-color: var(--bg-color);
+      margin: 0;
+      padding: 0;
+      color: #333;
+      font-size: 16px;
+      display: flex;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    .fade-in {
+      animation: fadeIn 0.3s ease-in-out;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(5px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .btn-animate {
+      transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+      cursor: pointer;
+      border: none;
+      outline: none;
+    }
+
+    .btn-animate:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+    }
+
+    .btn-animate:active {
+      transform: scale(0.96);
+      opacity: 0.8;
+    }
+
+    #login-screen {
+      position: fixed;
+      inset: 0;
+      background: linear-gradient(135deg, #fce4ec 0%, #fff8e1 100%);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 20000;
+      transition: 0.5s;
+    }
+
+    .login-box {
+      background: white;
+      padding: 45px 35px;
+      border-radius: 30px;
+      width: 85%;
+      max-width: 360px;
+      text-align: center;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.08);
+    }
+
+    .login-box h2 {
+      color: #546e7a;
+      margin-bottom: 15px;
+      font-size: 22px;
+    }
+
+    .login-input {
+      width: 100%;
+      height: 52px;
+      margin-bottom: 20px;
+      border-radius: 15px;
+      border: 1.5px solid #eaeaea;
+      padding: 0 15px;
+      box-sizing: border-box;
+      font-size: 16px;
+      background: #fafafa;
+      outline: none;
+      transition: 0.3s;
+      text-align: center;
+    }
+
+    .login-input:focus {
+      border-color: var(--primary-color);
+      background: #fff;
+    }
+
+    .btn-login {
+      width: 100%;
+      height: 55px;
+      background: var(--primary-color);
+      color: white;
+      border-radius: 15px;
+      font-size: 18px;
+      font-weight: bold;
+    }
+
+    .btn-login.working {
+      background: #90a4ae;
+      cursor: wait;
+    }
+
+    #sidebar {
+      width: var(--sidebar-width);
+      background: var(--sidebar-bg);
+      box-shadow: 2px 0 15px rgba(0, 0, 0, 0.03);
+      position: fixed;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      display: none;
+    }
+
+    .sidebar-header {
+      padding: 25px 20px;
+      text-align: center;
+      border-bottom: 1px solid #f0f0f0;
+    }
+
+    .sidebar-header h1 {
+      margin: 0;
+      font-size: 20px;
+      color: var(--primary-color);
+    }
+
+    .sidebar-user {
+      font-size: 13px;
+      color: #78909c;
+      margin-top: 10px;
+    }
+
+    #home-menu {
+      flex: 1;
+      overflow-y: auto;
+      padding: 15px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .menu-card {
+      padding: 12px 18px;
+      background: transparent;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      cursor: pointer;
+      color: #546e7a;
+      transition: all 0.2s ease;
+      box-shadow: none;
+      text-align: left;
+      flex-shrink: 0;
+    }
+
+    .menu-card:hover {
+      background: #f4f7f6;
+    }
+
+    .menu-card.active {
+      background: #e3f2fd;
+      color: #1976d2;
+      font-weight: bold;
+    }
+
+    .menu-card span {
+      font-size: 22px;
+      margin: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+    }
+
+    .menu-card h2 {
+      font-size: 14px;
+      margin: 0;
+      flex: 1;
+      font-weight: inherit;
+    }
+
+    @media (max-width: 768px) {
+      #sidebar {
+        width: 100%;
+        height: var(--bottom-nav-height);
+        top: auto;
+        bottom: 0;
+        flex-direction: row;
+        border-top: 1px solid #eee;
+        box-shadow: 0 -4px 15px rgba(0, 0, 0, 0.05);
+        background: #ffffff;
+      }
+
+      #home-menu {
+        flex-direction: row;
+        padding: 0 5px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        white-space: nowrap;
+        scroll-behavior: smooth;
+        gap: 4px;
+        align-items: center;
+      }
+
+      .menu-card {
+        flex-direction: column;
+        gap: 3px;
+        padding: 8px 10px;
+        border-radius: 8px;
+        min-width: 70px;
+        text-align: center;
+        justify-content: center;
+      }
+
+      .menu-card.active {
+        background: rgba(25, 118, 210, 0.08);
+        color: #1976d2;
+        border-top: none;
+      }
+
+      .menu-card span {
+        font-size: 20px;
+      }
+
+      .menu-card h2 {
+        font-size: 11px;
+        white-space: nowrap;
+      }
+    }
+
+    .sidebar-footer {
+      padding: 20px;
+      border-top: 1px solid #f0f0f0;
+    }
+
+    .logout-btn {
+      width: 100%;
+      background: #fff2f2;
+      color: var(--error-color);
+      padding: 12px;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: bold;
+      border: 1px solid #ffcdd2;
+    }
+
+    #main-content {
+      flex: 1;
+      margin-left: var(--sidebar-width);
+      display: flex;
+      flex-direction: column;
+      width: calc(100% - var(--sidebar-width));
+      display: none;
+    }
+
+    .top-header-mobile {
+      display: none;
+    }
+
+    .container {
+      display: none;
+      padding: 30px;
+      padding-bottom: 100px;
+      max-width: 1200px;
+      margin: 0 auto;
+      width: 100%;
+      box-sizing: border-box;
+    }
+
+    #stats-container {
+      display: none;
+      padding: 30px;
+      padding-bottom: 100px;
+      max-width: 800px;
+      margin: 0 auto;
+      position: relative;
+      width: 100%;
+      box-sizing: border-box;
+    }
+
+    #welcome-container {
+      text-align: center;
+      color: #78909c;
+      margin-top: 10vh;
+    }
+
+    #welcome-container h2 {
+      font-size: 28px;
+      color: var(--primary-color);
+    }
+
+    .filter-bar {
+      display: flex;
+      flex-direction: row;
+      flex-wrap: wrap;
+      gap: 15px;
+      background: white;
+      padding: 20px;
+      border-radius: 20px;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.03);
+      margin-bottom: 25px;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .filter-title {
+      font-size: 18px;
+      color: var(--primary-color);
+      font-weight: bold;
+    }
+
+    .chart-grid,
+    .twoday-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 20px;
+    }
+
+    .mini-chart-box,
+    .twoday-card,
+    .stat-list {
+      background: white;
+      border-radius: 20px;
+      padding: 20px;
+      position: relative;
+      border: 1px solid #f0f0f0;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.03);
+    }
+
+    .box-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 15px;
+    }
+
+    .box-title {
+      font-size: 15px;
+      color: #455a64;
+      font-weight: bold;
+      background: #f4f7f6;
+      padding: 6px 12px;
+      border-radius: 8px;
+    }
+
+    .box-total {
+      font-size: 13px;
+      color: #78909c;
+      font-weight: bold;
+      background: #fff3e0;
+      padding: 4px 10px;
+      border-radius: 8px;
+      color: #ef6c00;
+    }
+
+    .slide-nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: white;
+      border-radius: 20px;
+      padding: 8px 15px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.03);
+    }
+
+    .nav-arrow {
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      border: none;
+      background: #f4f7f6;
+      color: var(--primary-color);
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    /* 緊湊精緻排版：降低高度與內距，視野倍增 */
+    .row-input {
+      display: flex;
+      flex-direction: row;
+      flex-wrap: nowrap;
+      gap: 8px;
+      margin-bottom: 6px;
+      padding: 8px 12px;
+      border-radius: 10px;
+      background: white;
+      border: 1px solid #e2e8f0;
+      align-items: center;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.02);
+      transition: all 0.2s ease;
+    }
+
+    .row-input.has-content {
+      background-color: #fbfcfa;
+      border-color: #c5e1a5;
+      border-left: 4px solid #8bc34a;
+    }
+
+    .row-input-title {
+      min-width: 85px;
+      font-weight: bold;
+      font-size: 13px;
+      flex-shrink: 0;
+    }
+
+    .input-wrapper {
+      flex: 3;
+      min-width: 140px;
+    }
+
+    .input-wrapper input {
+      width: 100%;
+      height: 34px;
+      padding: 0 10px;
+      border: 1px solid #cbd5e0;
+      border-radius: 6px;
+      font-size: 13px;
+      outline: none;
+    }
+
+    .input-wrapper input:focus {
+      border-color: #3182ce;
+    }
+
+    .select-group {
+      flex: 2;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    select {
+      height: 34px;
+      padding: 0 6px;
+      border: 1px solid #cbd5e0;
+      border-radius: 6px;
+      font-size: 12px;
+      outline: none;
+      background: #ffffff;
+    }
+
+    .btn-reset {
+      width: 34px;
+      height: 34px;
+      background: #fff1f1;
+      color: #ff8a80;
+      border: 1px solid #ffcdd2;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .assign-checkbox-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      font-size: 12px;
+      color: #4a5568;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      user-select: none;
+      margin-left: 2px;
+    }
+
+    .order-btn-group {
+      display: flex;
+      gap: 3px;
+      flex-shrink: 0;
+    }
+
+    .order-btn {
+      height: 34px;
+      padding: 0 8px;
+      background: #edf2f7;
+      border: 1px solid #cbd5e0;
+      border-radius: 6px;
+      font-size: 11px;
+      cursor: pointer;
+      font-weight: bold;
+      color: #4a5568;
+    }
+
+    .order-btn:hover {
+      background: #e2e8f0;
+    }
+
+    @media (max-width: 768px) {
+      .row-input {
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 8px;
+      }
+      .row-input-title {
+        width: 100%;
+      }
+      .input-wrapper {
+        width: 100%;
+      }
+      .select-group {
+        width: 100%;
+        justify-content: space-between;
+      }
+    }
+
+    .btn-save {
+      position: fixed;
+      bottom: 30px;
+      left: calc(50% + (var(--sidebar-width) / 2));
+      transform: translateX(-50%);
+      background: var(--primary-color);
+      color: white;
+      border: none;
+      height: 60px;
+      width: 80%;
+      max-width: 400px;
+      border-radius: 30px;
+      font-size: 18px;
+      font-weight: bold;
+      box-shadow: 0 10px 25px rgba(69, 90, 100, 0.3);
+      z-index: 999;
+    }
+
+    @media (max-width: 768px) {
+      body {
+        flex-direction: column;
+      }
+
+      .top-header-mobile {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: white;
+        padding: 15px 20px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+        position: sticky;
+        top: 0;
+        z-index: 1000;
+      }
+
+      .top-header-mobile h1 {
+        margin: 0;
+        font-size: 18px;
+        color: var(--primary-color);
+      }
+
+      .logout-btn-mobile {
+        background: #ffebee;
+        color: #c62828;
+        border: none;
+        padding: 6px 12px;
+        border-radius: 8px;
+        font-weight: bold;
+        font-size: 13px;
+      }
+
+      #main-content {
+        margin-left: 0;
+        width: 100%;
+        padding-bottom: var(--bottom-nav-height);
+      }
+
+      .container,
+      #stats-container {
+        padding: 15px;
+      }
+
+      .btn-save {
+        left: 50%;
+        bottom: calc(var(--bottom-nav-height) + 15px);
+      }
+
+      #sidebar {
+        width: 100%;
+        height: var(--bottom-nav-height);
+        top: auto;
+        bottom: 0;
+        flex-direction: row;
+        border-top: 1px solid #eee;
+        box-shadow: 0 -4px 15px rgba(0, 0, 0, 0.03);
+      }
+
+      .sidebar-header,
+      .sidebar-footer {
+        display: none;
+      }
+
+      #home-menu {
+        flex-direction: row;
+        padding: 0;
+        overflow-x: auto;
+        overflow-y: hidden;
+        white-space: nowrap;
+        scroll-behavior: smooth;
+        gap: 0;
+      }
+
+      #home-menu::-webkit-scrollbar {
+        display: none;
+      }
+
+      .menu-card {
+        flex-direction: column;
+        gap: 4px;
+        padding: 10px 15px;
+        border-radius: 0;
+        min-width: 75px;
+        text-align: center;
+        justify-content: center;
+      }
+
+      .menu-card.active {
+        background: transparent;
+        color: #1976d2;
+        border-top: 3px solid #1976d2;
+      }
+
+      .menu-card span {
+        font-size: 22px;
+      }
+
+      .menu-card h2 {
+        font-size: 11px;
+        white-space: normal;
+        line-height: 1.2;
+      }
+
+      .row-input {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .input-wrapper,
+      .select-group {
+        width: 100%;
+      }
+
+      .filter-bar {
+        flex-direction: column;
+        align-items: stretch;
+      }
+    }
+
+    #loader-mask {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(255, 255, 255, 0.7);
+      z-index: 30000;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      backdrop-filter: blur(5px);
+    }
+
+    .spinner {
+      width: 45px;
+      height: 45px;
+      border: 4px solid #eceff1;
+      border-top: 4px solid var(--primary-color);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      0% {
+        transform: rotate(0deg);
+      }
+      100% {
+        transform: rotate(360deg);
+      }
+    }
+
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 40px;
+      height: 22px;
+    }
+
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #c3c9c8;
+      transition: .4s;
+      border-radius: 34px;
+    }
+
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 16px;
+      width: 16px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: .4s;
+      border-radius: 50%;
+    }
+
+    input:checked+.slider {
+      background-color: #00e676;
+    }
+
+    input:checked+.slider:before {
+      transform: translateX(18px);
+    }
+
+    .date-input {
+      flex: 1;
+      height: 45px;
+      border: 1px solid #ddd;
+      border-radius: 12px;
+      padding: 0 10px;
+      font-size: 15px;
+      background: #fafafa;
+    }
+
+    .btn-search,
+    .btn-share-myopia {
+      height: 45px;
+      color: white;
+      border: none;
+      border-radius: 12px;
+      font-weight: bold;
+      font-size: 15px;
+      padding: 0 20px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+    }
+
+    .btn-search {
+      background: var(--primary-color);
+    }
+
+    .btn-share-myopia {
+      background: #00C300;
+      box-shadow: 0 4px 10px rgba(0, 195, 0, 0.2);
+    }
+
+    .twoday-body {
+      display: flex;
+      border-top: 1px solid #eee;
+    }
+
+    .day-column {
+      flex: 1;
+      padding: 15px;
+    }
+
+    .day-column.today {
+      border-right: 1px dashed #eee;
+      background: #fbfcfa;
+    }
+
+    .column-title {
+      text-align: center;
+      font-size: 13px;
+      margin-bottom: 15px;
+      padding: 6px;
+      border-radius: 8px;
+      font-weight: bold;
+    }
+
+    .bg-today {
+      background: #e3f2fd;
+      color: #1976d2;
+    }
+
+    .bg-yest {
+      background: #f5f5f5;
+      color: #616161;
+    }
+
+    .stat-item {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      font-size: 14px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid #f9f9f9;
+    }
+
+    .stat-label {
+      color: #888;
+      font-size: 13px;
+    }
+
+    .stat-val {
+      font-weight: bold;
+      color: #333;
+    }
+
+    .highlight {
+      color: #d32f2f;
+    }
+
+    .btn-save:hover {
+      transform: translateX(-50%) translateY(-2px) !important;
+    }
+
+    .btn-save:active {
+      transform: translateX(-50%) scale(0.96) !important;
+    }
+
+    .conversion-detail-row {
+      transition: background-color 0.25s ease, border-color 0.25s ease;
+    }
+
+    .conversion-detail-row.is-reassigned {
+      background-color: #d7ccc8 !important;
+      border: 1px solid #a5d6a7 !important;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="login-screen">
+    <div class="login-box">
+      <h2>首次使用裝置認證</h2>
+      <p style="font-size: 13px; color: #78909c; margin-bottom: 20px;">請輸入您的個人密碼完成綁定，認證後本機將永久自動登入。</p>
+      <input type="password" id="login-pwd" class="login-input" placeholder="請輸入個人解鎖密碼">
+      <button id="login-btn" class="btn-login btn-animate" onclick="attemptLogin()">確認授權此裝置</button>
+      <p id="login-error" style="color:red; font-size:14px; margin-top:15px;"></p>
+    </div>
+  </div>
+
+  <div id="loader-mask">
+    <div class="spinner"></div>
+    <div id="loader-text" style="margin-top: 15px; font-weight: bold; color: #455a64;">處理中...</div>
+  </div>
+
+  <nav id="sidebar">
+    <div class="sidebar-header">
+      <h1>工作任務維護</h1>
+      <div id="user-display" class="sidebar-user">👤 尚未登入</div>
+    </div>
+    <div id="home-menu">
+      <div id="btn-weekly" class="menu-card btn-animate" onclick="openWork('weekly')"><span>📅</span>
+        <h2>(週)工作設定</h2>
+      </div>
+      <div id="btn-monthly" class="menu-card btn-animate" onclick="openWork('monthly')"><span>📆</span>
+        <h2>(月)工作設定</h2>
+      </div>
+      <div id="btn-assign" class="menu-card btn-animate" onclick="openWork('assign')"><span>👥</span>
+        <h2>人員指派</h2>
+      </div>
+      <div id="btn-stats" class="menu-card btn-animate" onclick="openStats()"><span>📊</span>
+        <h2>諮詢統計</h2>
+      </div>
+      <div id="btn-loss" class="menu-card btn-animate" onclick="openLoss()" style="display:none;"><span>☎️</span>
+        <h2>失聯關懷</h2>
+      </div>
+      <div id="btn-myopia" class="menu-card btn-animate" onclick="openMyopia()" style="display:none;"><span>👁️</span>
+        <h2>產品統計</h2>
+      </div>
+      <div id="btn-twoday" class="menu-card btn-animate" onclick="openTwoDay()" style="display:none;"><span>🔎</span>
+        <h2>二日數據</h2>
+      </div>
+      <div id="btn-conversion" class="menu-card btn-animate" onclick="openConversion()" style="display:none;">
+        <span>📈</span>
+        <h2>締結率計算</h2>
+      </div>
+      <div id="btn-doctor" class="menu-card btn-animate" onclick="openDoctor()" style="display:none;">
+        <span style="background: linear-gradient(135deg, #A0C4FF, #B5EAD7); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">👨‍⚕️</span>
+        <h2>醫師異動</h2>
+      </div>
+    </div>
+    <div class="sidebar-footer">
+      <button id="logout-btn" class="logout-btn btn-animate" onclick="logout(true)">安全登出</button>
+    </div>
+  </nav>
+
+  <main id="main-content">
+    <div class="top-header-mobile">
+      <h1 id="mobile-title">工作任務維護</h1>
+      <button class="logout-btn-mobile" onclick="logout(true)">登出</button>
+    </div>
+
+    <div id="welcome-container" class="container fade-in">
+      <h2>歡迎使用系統</h2>
+      <p>請從導覽列選擇您要進行的操作</p>
+    </div>
+
+    <div id="loss-container" class="container fade-in">
+      <div class="filter-bar">
+        <div class="filter-title">📅 完銷資料統計期間</div>
+        <div style="display: flex; gap:10px; align-items: center; flex-wrap: wrap;">
+          <input type="date" id="loss-date-start" class="date-input">
+          <span style="color:#aaa">~</span>
+          <input type="date" id="loss-date-end" class="date-input">
+          <button class="btn-search btn-animate" onclick="loadLossData()">刷新</button>
+          <button class="btn-share-myopia btn-animate" onclick="shareLossImage()">📸 分享</button>
+        </div>
+        <div style="width: 100%; font-size:13px; color:#78909c; margin-top: 5px;">📊 數據以「完銷日期」為篩選基準</div>
+      </div>
+      <div class="chart-grid">
+        <div class="mini-chart-box">
+          <div class="box-header">
+            <div class="box-title">📈 關懷執行進度</div>
+            <div class="box-total" id="loss-total-1">總數: 0</div>
+          </div>
+          <div style="height:240px; display:flex; justify-content:center;"><canvas id="chartLossProgress"></canvas></div>
+        </div>
+        <div class="mini-chart-box">
+          <div class="box-header">
+            <div class="box-title">🎯 轉化成效分析</div>
+            <div class="box-total" id="loss-total-2">已關懷: 0</div>
+          </div>
+          <div style="height:240px;"><canvas id="chartLossRates"></canvas></div>
+        </div>
+        <div class="mini-chart-box" style="grid-column: 1 / -1; height:auto; min-height:300px;">
+          <div class="box-header">
+            <div class="box-title">🏆 人員成效排行榜</div>
+          </div>
+          <div style="height:300px;"><canvas id="chartStaffPerform"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="work-container" class="container fade-in">
+      <div class="filter-bar" style="margin-bottom: 15px; padding: 15px 20px;">
+        <div class="filter-title" id="work-title">📝 工作任務清單</div>
+      </div>
+      <div id="list-content"></div>
+      <button class="btn-save btn-animate" onclick="processSave()">💾 儲存所有變更</button>
+    </div>
+
+    <div id="stats-container" class="fade-in">
+      <div class="filter-bar" style="margin-bottom: 15px; padding: 15px 20px;">
+        <div class="filter-title">📊 諮詢服務統計</div>
+        <button id="share-btn" class="btn-share-myopia btn-animate" onclick="shareStatsAsImage()">📸 分享統計</button>
+      </div>
+      <div class="slide-nav">
+        <button class="nav-arrow" onclick="changeSlide(-1)">❮</button>
+        <div id="slide-title" style="font-size: 16px; font-weight: bold; color: #455a64;">全體總覽</div>
+        <button class="nav-arrow" onclick="changeSlide(1)">❯</button>
+      </div>
+      <div class="mini-chart-box" style="margin-bottom: 20px;">
+        <div id="slide-total-badge" class="box-total" style="position: absolute; top: 15px; right: 15px; z-index: 10;"></div>
+        <div style="height:280px;"><canvas id="myChart"></canvas></div>
+        <div id="slide-start-date" style="position: absolute; bottom: 10px; right: 15px; font-size: 11px; color: #90a4ae; font-weight: bold; display: none;"></div>
+      </div>
+      <div class="stat-list" id="slide-content"></div>
+    </div>
+
+    <div id="myopia-container" class="container fade-in">
+      <div class="filter-bar">
+        <div class="filter-title">☀️ 大三元統計分析</div>
+        <button class="btn-share-myopia btn-animate" id="btn-share-myopia" onclick="shareMyopiaImage()">📸 分享</button>
+      </div>
+      <div class="chart-grid">
+        <div class="mini-chart-box">
+          <div class="box-header">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <div class="box-title">📦 三大產品佔比</div>
+              <label class="switch" style="transform: scale(0.7);"><input type="checkbox" id="toggle-product-active" onchange="updateProductChart()" checked><span class="slider"></span></label>
+            </div>
+            <div class="box-total" id="total-product">總計: 0人</div>
+          </div>
+          <div style="height:240px; display:flex; justify-content:center;"><canvas id="chartProduct"></canvas></div>
+        </div>
+        <div class="mini-chart-box">
+          <div class="box-header">
+            <div class="box-title">❤️ 使用狀態</div>
+            <div class="box-total" id="total-status">總計: 0人</div>
+          </div>
+          <div style="height:240px;"><canvas id="chartStatus"></canvas></div>
+        </div>
+        <div class="mini-chart-box" style="grid-column: 1 / -1;">
+          <div class="box-header">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <div class="box-title">🎂 年齡層分佈</div>
+              <label class="switch" style="transform: scale(0.7);"><input type="checkbox" id="toggle-age-active" onchange="updateAgeChart()" checked><span class="slider"></span></label>
+            </div>
+            <div class="box-total" id="total-age">總計: 0人</div>
+          </div>
+          <div style="height:260px;"><canvas id="chartAge"></canvas></div>
+        </div>
+        <div class="mini-chart-box" style="grid-column: 1 / -1;">
+          <div class="box-header">
+            <div class="box-title">⚠️ 未回診天數警示</div>
+            <div class="box-total" id="total-days">總計: 0人</div>
+          </div>
+          <div style="height:240px;"><canvas id="chartDays"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="twoday-container" class="container fade-in">
+      <div class="filter-bar" style="position: sticky; top: 15px; z-index: 99;">
+        <div class="filter-title">📊 二日數據總覽 (今 vs 昨)</div>
+        <button class="btn-share-myopia btn-animate" onclick="shareTwoDayImage()">📸 截圖分享 LINE</button>
+      </div>
+      <div id="twoday-content" class="twoday-grid"></div>
+    </div>
+
+    <div id="conversion-container" class="container fade-in">
+      <div class="filter-bar">
+        <div class="filter-title">📈 締結率服務成效統計</div>
+        <div style="display: flex; gap:10px; align-items: center; flex-wrap: wrap;">
+          <input type="date" id="conversion-date-start" class="date-input">
+          <span style="color:#aaa">~</span>
+          <input type="date" id="conversion-date-end" class="date-input">
+          <button class="btn-search btn-animate" onclick="loadConversionData()">刷新</button>
+        </div>
+        <div style="width: 100%; font-size:13px; color:#78909c; margin-top: 5px;">📊 數據來源自「諮詢記錄帶入」，以「紀錄時間」為日期篩選基準</div>
+      </div>
+      <div id="conversion-content" class="chart-grid"></div>
+    </div>
+  </main>
+
+  <script>
+    const SUPABASE_URL = "https://niytitszugkfsfdwlwqt.supabase.co";
+    const SUPABASE_KEY = "sb_publishable_dsxxWLXxfbTHmXOfmEUUfA_Y8h1tykR";
+    const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    
+
+    let allData = null, currentMode = '', currentUser = '', statsData = [], currentSlide = 0, myPieChart = null;
+    let serviceStartDate = ""; 
+
+    window.onload = async () => { 
+      const isVerified = localStorage.getItem("device_authorized_token");
+      const savedStaff = localStorage.getItem("current_staff_name");
+
+      if (isVerified === "true" && savedStaff) {
+        currentUser = savedStaff;
+        document.getElementById('user-display').innerText = '👤 ' + currentUser;
+        document.getElementById('sidebar').style.display = 'flex';
+        document.getElementById('main-content').style.display = 'flex';
+        document.getElementById('login-screen').style.display = 'none';
+
+        try {
+          const { data } = await _supabase.from('system_settings').select('value').eq('key', 'line_uid_map').single();
+          if (data && data.value && data.value[currentUser]) {
+            applyPermissions(data.value[currentUser].permissions || "ABCDEFGHIJ");
+          } else {
+            applyPermissions("ABCDEFGHIJ");
+          }
+        } catch (e) {
+          applyPermissions("ABCDEFGHIJ");
+        }
+
+        await refreshData();
+        goHome();
+      } else {
+        document.getElementById('login-screen').style.display = 'flex';
+      }
+    };
+
+    // 移除超時登出計時，保留空函式防呆
+    function setupInactivityTimer() {}
+    function resetIdleTimer() {}
+
+    async function attemptLogin() {
+      const inputPwd = document.getElementById('login-pwd').value.trim();
+      const btn = document.getElementById('login-btn');
+      if (!inputPwd) { alert("請輸入個人解鎖密碼！"); return; }
+      
+      btn.innerText = '核對中...'; btn.classList.add('working'); showMask('個人安全憑證核對中...');
+      
+      try {
+        const { data, error } = await _supabase
+          .from('system_settings')
+          .select('value')
+          .eq('key', 'line_uid_map')
+          .single();
+
+        if (error || !data || !data.value) throw new Error("認證模組連線異常");
+
+        const uidMap = data.value;
+        let authenticatedUser = null;
+        let userPermissions = "ABCDEFGHIJ";
+
+        for (const staffName in uidMap) {
+          if (uidMap[staffName] && uidMap[staffName].password === inputPwd) {
+            authenticatedUser = staffName;
+            userPermissions = uidMap[staffName].permissions || "ABCDEFGHIJ";
+            break;
+          }
+        }
+
+        if (authenticatedUser) {
+          currentUser = authenticatedUser;
+          localStorage.setItem("device_authorized_token", "true");
+          localStorage.setItem("current_staff_name", authenticatedUser);
+
+          document.getElementById('user-display').innerText = '👤 ' + authenticatedUser;
+          document.getElementById('sidebar').style.display = 'flex';
+          document.getElementById('main-content').style.display = 'flex';
+          document.getElementById('login-screen').style.opacity = '0'; 
+          setTimeout(() => { document.getElementById('login-screen').style.display = 'none'; }, 500);
+          
+          applyPermissions(userPermissions); 
+          await refreshData(); 
+          setupInactivityTimer(); 
+          resetIdleTimer();
+          goHome();
+          hideMask();
+        } else {
+          hideMask(); 
+          btn.innerText = '確認授權此裝置'; 
+          btn.classList.remove('working'); 
+          document.getElementById('login-error').innerText = "密碼錯誤！找不到對應的授權人員"; 
+        }
+      } catch (e) {
+        hideMask(); 
+        btn.innerText = '確認授權此裝置'; 
+        btn.classList.remove('working'); 
+        alert("核對失敗: " + e.message);
+      }
+    }
+
+    function logout(confirmNeeded) {
+      if(confirmNeeded && !confirm("確定要登出並取消本機授權嗎？")) return;
+      const loginBtn = document.getElementById('login-btn');
+      loginBtn.innerText = '確認授權此裝置';      
+      loginBtn.classList.remove('working'); 
+      document.getElementById('login-pwd').value = '';
+
+      clearTimeout(idleTimer);
+      currentUser = ''; 
+      localStorage.removeItem("device_authorized_token");
+      localStorage.removeItem("current_staff_name");
+      
+      document.getElementById('login-screen').style.display = 'flex';
+      setTimeout(() => { document.getElementById('login-screen').style.opacity = '1'; }, 10);
+      document.getElementById('sidebar').style.display = 'none';
+      document.getElementById('main-content').style.display = 'none';
+    }
+
+    async function refreshData() { 
+      showMask('載入中...'); 
+      try {
+        const { data: staffData } = await _supabase.from('system_settings').select('value').eq('key', 'staff_list').single();
+        const { data: taskData } = await _supabase.from('task_configs').select('*').order('item_order', { ascending: true });
+
+        // 過濾選單人員：排除「全員」以避免下拉重複
+        const rawStaffList = (staffData && staffData.value) ? staffData.value : [];
+        const execOptions = rawStaffList.filter(s => s && s !== '全員');
+        const tasks = taskData || [];
+
+        allData = {
+          weekly: tasks.filter(t => t.category === 'weekly').map(t => ({
+            id: t.id,
+            title: t.title,
+            content: t.content || '',
+            priority: t.priority || '中',
+            executor: t.executor || '全員',
+            needAssign: !!t.need_assign,
+            order: t.item_order || 0
+          })),
+          monthly: tasks.filter(t => t.category === 'monthly').map(t => ({
+            id: t.id,
+            title: t.title,
+            content: t.content || '',
+            priority: t.priority || '中',
+            executor: t.executor || '全員',
+            needAssign: !!t.need_assign,
+            order: t.item_order || 0
+          })),
+          assign: tasks.filter(t => t.category === 'assign').map(t => ({
+            id: t.id,
+            title: t.title,
+            executor: t.executor || '',
+            order: t.item_order || 0
+          })),
+          execOptions: execOptions
+        };
+        hideMask(); 
+      } catch (e) {
+        hideMask();
+        console.error("載入任務設定失敗:", e);
+      }
+    }
+
+    // 渲染週/月工作多項目卡片與人員指派連動清單
+    function renderList(mode) {
+      const container = document.getElementById('list-content');
+      container.innerHTML = '';
+
+      // 1. 週工作設定 (週一至週日，每日支援多項目自由擴充)
+      if (mode === 'weekly') {
+        const weekDays = ['週一', '週二', '週三', '週四', '週五', '週六', '週日'];
+        
+        weekDays.forEach((wTitle, dayIdx) => {
+          // 抓取屬於該天的所有任務
+          const dayTasks = (allData.weekly || []).filter(d => d.title === wTitle);
+          if (dayTasks.length === 0) {
+            dayTasks.push({ title: wTitle, content: '', priority: '中', needAssign: false });
+          }
+
+          const dayCard = document.createElement('div');
+          dayCard.className = 'mini-chart-box mb-3 p-3';
+          dayCard.style.cssText = 'background:#ffffff; border:1px solid #cbd5e0; border-radius:12px; margin-bottom:12px; box-shadow:0 2px 6px rgba(0,0,0,0.02);';
+          dayCard.dataset.dayTitle = wTitle;
+
+          let rowsHtml = '';
+          dayTasks.forEach((t, tIdx) => {
+            rowsHtml += createSubTaskRowHtml('weekly', wTitle, t.content, t.priority, t.needAssign);
+          });
+
+          dayCard.innerHTML = `
+            <div class="d-flex justify-content-between align-items-center mb-2 pb-1" style="border-bottom: 1.5px solid #edf2f7; display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-weight:800; font-size:14px; color:#2b6cb0;">📅 ${wTitle}</span>
+              <button type="button" class="btn-animate" onclick="addSubTaskRow(this, 'weekly', '${wTitle}')" style="background:#edf2f7; border:1px solid #cbd5e0; color:#2b6cb0; padding:2px 8px; border-radius:6px; font-size:12px; font-weight:bold;">＋ 新增項目</button>
+            </div>
+            <div class="sub-tasks-container">${rowsHtml}</div>
+          `;
+          container.appendChild(dayCard);
+        });
+      }
+
+      // 2. 月工作設定 (1號至31號，每日支援多項目自由擴充)
+      else if (mode === 'monthly') {
+        for (let day = 1; day <= 31; day++) {
+          const dTitle = `${day}號`;
+          const dayTasks = (allData.monthly || []).filter(d => d.title === dTitle);
+          if (dayTasks.length === 0) {
+            dayTasks.push({ title: dTitle, content: '', priority: '中', needAssign: false });
+          }
+
+          const dayCard = document.createElement('div');
+          dayCard.className = 'mini-chart-box mb-3 p-3';
+          dayCard.style.cssText = 'background:#ffffff; border:1px solid #cbd5e0; border-radius:12px; margin-bottom:12px; box-shadow:0 2px 6px rgba(0,0,0,0.02);';
+          dayCard.dataset.dayTitle = dTitle;
+
+          let rowsHtml = '';
+          dayTasks.forEach((t, tIdx) => {
+            rowsHtml += createSubTaskRowHtml('monthly', dTitle, t.content, t.priority, t.needAssign);
+          });
+
+          dayCard.innerHTML = `
+            <div class="d-flex justify-content-between align-items-center mb-2 pb-1" style="border-bottom: 1.5px solid #edf2f7; display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-weight:800; font-size:14px; color:#c05621;">📆 每月 ${dTitle}</span>
+              <button type="button" class="btn-animate" onclick="addSubTaskRow(this, 'monthly', '${dTitle}')" style="background:#edf2f7; border:1px solid #cbd5e0; color:#c05621; padding:2px 8px; border-radius:6px; font-size:12px; font-weight:bold;">＋ 新增項目</button>
+            </div>
+            <div class="sub-tasks-container">${rowsHtml}</div>
+          `;
+          container.appendChild(dayCard);
+        }
+      }
+
+      // 3. 人員指派設定 (純連動：只顯示週/月工作有勾選📌指派之項目)
+      else if (mode === 'assign') {
+        // 從目前的記憶體或資料庫取得所有被勾選需指派的工作
+        const assignedList = [];
+
+        // 納入週工作需指派項目
+        (allData.weekly || []).filter(w => w.needAssign && w.content).forEach(w => {
+          const key = `[週] ${w.title}：${w.content}`;
+          // 比對既有的指派人
+          const existAssign = (allData.assign || []).find(a => a.title === key);
+          assignedList.push({
+            title: key,
+            executor: existAssign ? existAssign.executor : (w.executor !== '全員' ? w.executor : ''),
+            order: existAssign ? existAssign.order : 99
+          });
+        });
+
+        // 納入月工作需指派項目
+        (allData.monthly || []).filter(m => m.needAssign && m.content).forEach(m => {
+          const key = `[月] ${m.title}：${m.content}`;
+          const existAssign = (allData.assign || []).find(a => a.title === key);
+          assignedList.push({
+            title: key,
+            executor: existAssign ? existAssign.executor : (m.executor !== '全員' ? m.executor : ''),
+            order: existAssign ? existAssign.order : 99
+          });
+        });
+
+        // 依照順序排序
+        assignedList.sort((a, b) => a.order - b.order);
+
+        const tipBar = document.createElement('div');
+        tipBar.style.cssText = 'margin-bottom: 12px; padding: 10px 14px; background: #ebf8ff; border: 1px solid #bee3f8; border-radius: 8px; font-size: 13px; color: #2b6cb0; font-weight: 600;';
+        tipBar.innerHTML = `📌 共有 <b>${assignedList.length}</b> 項工作被指定為整月專人處理（未在此列出者均由<b>全員</b>共同處理）。`;
+        container.appendChild(tipBar);
+
+        const listDiv = document.createElement('div');
+        listDiv.id = 'assign-list-rows';
+
+        if (assignedList.length === 0) {
+          listDiv.innerHTML = '<div style="text-align:center; padding:40px; color:#a0aec0; font-size:14px; background:#fff; border-radius:12px; border:1px dashed #cbd5e0;">目前沒有任何工作勾選「📌指派」<br><span style="font-size:12px; color:#718096; margin-top:5px; display:block;">請前往 (週)工作設定 或 (月)工作設定 勾選需專人處理的項目</span></div>';
+        } else {
+          assignedList.forEach((item, idx) => {
+            let staffOpts = `<option value="">-- 請指定負責同仁 --</option>`;
+            (allData.execOptions || []).forEach(s => {
+              staffOpts += `<option value="${s}" ${item.executor===s?'selected':''}>${s}</option>`;
+            });
+
+            const div = document.createElement('div');
+            div.className = 'row-input has-content';
+            div.style.cssText = 'display:flex; align-items:center; gap:8px; margin-bottom:6px; padding:8px 12px; background:#ffffff; border:1px solid #e2e8f0; border-radius:8px;';
+            div.innerHTML = `
+              <div class="order-btn-group" style="display:flex; gap:3px;">
+                <button type="button" class="order-btn" onclick="moveAssignRow(this, -1)" title="上移">⬆</button>
+                <button type="button" class="order-btn" onclick="moveAssignRow(this, 1)" title="下移">⬇</button>
+              </div>
+              <div class="input-wrapper" style="flex:3;">
+                <input type="text" class="assign-title-input" value="${item.title}" readonly disabled style="background:#f7fafc; color:#2d3748; font-weight:bold; cursor:not-allowed;">
+              </div>
+              <div class="select-group" style="flex:2;">
+                <select class="exec-select" style="width:100%; height:34px; border-radius:6px; border:1px solid #cbd5e0; font-size:13px; font-weight:bold; color:#2b6cb0;">${staffOpts}</select>
+              </div>
+            `;
+            listDiv.appendChild(div);
+          });
+        }
+        container.appendChild(listDiv);
+      }
+    }
+
+    // 產生子項目單列 HTML
+    function createSubTaskRowHtml(category, dayTitle, content = '', priority = '中', needAssign = false) {
+      return `
+        <div class="sub-task-row row-input ${content ? 'has-content' : ''}" style="margin-top:6px; margin-bottom:4px;">
+          <div class="input-wrapper" style="flex:3;">
+            <input type="text" class="task-content-input" value="${content || ''}" placeholder="請輸入任務內容...">
+          </div>
+          <div class="select-group" style="flex:1.2; justify-content:flex-end;">
+            <select class="imp-select" style="height:32px;">
+              <option value="低" ${priority==='低'?'selected':''}>低</option>
+              <option value="中" ${priority==='中'||!priority?'selected':''}>中</option>
+              <option value="高" ${priority==='高'?'selected':''}>高</option>
+            </select>
+            <label class="assign-checkbox-label" title="勾選後整月份皆移至人員指派指派專人">
+              <input type="checkbox" class="need-assign-checkbox" ${needAssign?'checked':''}> 📌指派
+            </label>
+            <button type="button" class="btn-reset btn-animate" onclick="removeSubTaskRow(this)" title="刪除此項">🗑️</button>
+          </div>
+        </div>
+      `;
+    }
+
+    // 動態新增子項目
+    function addSubTaskRow(btn, category, dayTitle) {
+      const card = btn.closest('.mini-chart-box');
+      const container = card.querySelector('.sub-tasks-container');
+      const newRowHtml = createSubTaskRowHtml(category, dayTitle, '', '中', false);
+      container.insertAdjacentHTML('beforeend', newRowHtml);
+      const lastInput = container.querySelector('.sub-task-row:last-child .task-content-input');
+      if (lastInput) lastInput.focus();
+    }
+
+    // 動態刪除子項目
+    function removeSubTaskRow(btn) {
+      const container = btn.closest('.sub-tasks-container');
+      const row = btn.closest('.sub-task-row');
+      if (container.querySelectorAll('.sub-task-row').length > 1) {
+        row.remove();
+      } else {
+        // 若只有最後一列，則清空內容並取消勾選
+        row.querySelector('.task-content-input').value = '';
+        row.querySelector('.need-assign-checkbox').checked = false;
+        row.classList.remove('has-content');
+      }
+    }
+
+    // 人員指派順序上下調整
+    function moveAssignRow(btn, direction) {
+      const row = btn.closest('.row-input');
+      if (direction === -1 && row.previousElementSibling) {
+        row.parentNode.insertBefore(row, row.previousElementSibling);
+      } else if (direction === 1 && row.nextElementSibling) {
+        row.parentNode.insertBefore(row.nextElementSibling, row);
+      }
+    }
+
+    // 儲存至 Supabase task_configs
+    async function processSave() { 
+      if (!currentMode) return; 
+      showMask('儲存至 Supabase...'); 
+      
+      let insertRows = [];
+
+      // 1. 儲存週/月工作（遍歷每日卡片中的所有子任務列）
+      if (currentMode === 'weekly' || currentMode === 'monthly') {
+        const cards = Array.from(document.querySelectorAll('#list-content .mini-chart-box'));
+        let globalOrder = 1;
+
+        cards.forEach(card => {
+          const dayTitle = card.dataset.dayTitle || '';
+          const rows = card.querySelectorAll('.sub-task-row');
+
+          rows.forEach(row => {
+            const contentVal = row.querySelector('.task-content-input').value.trim();
+            const priorityVal = row.querySelector('.imp-select').value || '中';
+            const needAssign = row.querySelector('.need-assign-checkbox').checked;
+
+            if (contentVal) {
+              insertRows.push({
+                category: currentMode,
+                item_order: globalOrder++,
+                title: dayTitle,
+                content: contentVal,
+                priority: priorityVal,
+                executor: '全員',
+                need_assign: needAssign
+              });
+            }
+          });
+        });
+      }
+
+      // 2. 儲存人員指派（儲存指派同仁與順序）
+      else if (currentMode === 'assign') {
+        const rows = Array.from(document.querySelectorAll('#assign-list-rows .row-input'));
+        rows.forEach((row, idx) => {
+          const titleVal = row.querySelector('.assign-title-input').value.trim();
+          const execVal = row.querySelector('.exec-select').value;
+          if (titleVal) {
+            insertRows.push({
+              category: 'assign',
+              item_order: idx + 1,
+              title: titleVal,
+              content: '',
+              priority: '中',
+              executor: execVal || '未指派',
+              need_assign: true
+            });
+          }
+        });
+      }
+
+      try {
+        await _supabase.from('task_configs').delete().eq('category', currentMode);
+        
+        if (insertRows.length > 0) {
+          const { error } = await _supabase.from('task_configs').insert(insertRows);
+          if (error) throw error;
+        }
+
+        await refreshData();
+        showMask('儲存成功！'); 
+        setTimeout(hideMask, 800);
+      } catch (e) {
+        hideMask();
+        alert("儲存失敗: " + e.message);
+      }
+    }
+    
+    function switchContainer(targetId, navBtnId, title) {
+      document.querySelectorAll('.menu-card').forEach(el => el.classList.remove('active'));
+      if (navBtnId) {
+        const btn = document.getElementById(navBtnId);
+        if(btn) btn.classList.add('active');
+      }
+      
+      document.getElementById('welcome-container').style.display = 'none';
+      document.getElementById('work-container').style.display = 'none';
+      document.getElementById('stats-container').style.display = 'none';
+      document.getElementById('myopia-container').style.display = 'none';
+      document.getElementById('loss-container').style.display = 'none';
+      document.getElementById('twoday-container').style.display = 'none';
+      document.getElementById('conversion-container').style.display = 'none'; 
+      
+      document.getElementById(targetId).style.display = 'block';
+      if(title) document.getElementById('mobile-title').innerText = title;
+    }
+
+    function openWork(mode) { 
+      currentMode = mode; 
+      let title = mode === 'weekly' ? '(週)工作設定' : (mode === 'monthly' ? '(月)工作設定' : '人員指派');
+      document.getElementById('work-title').innerText = `📝 ${title}`;
+      switchContainer('work-container', 'btn-' + mode, title);
+      renderList(mode); 
+    }
+    
+    async function openStats() { 
+      currentMode = 'stats'; 
+      showMask('載入統計...'); 
+      try {
+        const { data, error } = await _supabase.from('consultations').select('staff, status, care_staff, care_time, created_at');
+        if (error) throw error;
+
+        const list = data || [];
+        let earliestDate = "無資料";
+        if (list.length > 0) {
+          const dates = list.map(r => new Date(r.created_at)).filter(d => !isNaN(d.getTime()));
+          if (dates.length > 0) {
+            dates.sort((a, b) => a - b);
+            earliestDate = dates[0].toLocaleDateString('zh-TW');
+          }
+        }
+
+        const staffMap = {};
+        list.forEach(r => {
+          const staff = r.staff || "未指定";
+          if (!staffMap[staff]) staffMap[staff] = { total: 0, care: 0, closed: 0, lastCare: "無紀錄" };
+          staffMap[staff].total++;
+          if (r.status === '已關懷') staffMap[staff].care++;
+          if (r.status && r.status !== '待處理' && r.status !== '已關懷') staffMap[staff].closed++;
+          if (r.care_time) {
+            staffMap[staff].lastCare = r.care_time.replace('T', ' ').substring(0, 10);
+          }
+        });
+
+        statsData = Object.keys(staffMap).map(s => [
+          s,
+          staffMap[s].total,
+          staffMap[s].care,
+          staffMap[s].closed,
+          staffMap[s].lastCare
+        ]);
+
+        serviceStartDate = earliestDate;
+        currentSlide = 0; 
+        switchContainer('stats-container', 'btn-stats', '諮詢統計');
+        renderSlide(); 
+        hideMask(); 
+      } catch (e) {
+        hideMask();
+        alert("統計載入失敗: " + e.message);
+      }
+    }
+
+    
+
+    // 新增指派任務行輔助函式
+    function addCustomAssignRow() {
+      const listDiv = document.getElementById('assign-list-rows');
+      const emptyTip = document.getElementById('assign-empty-tip');
+      if (emptyTip) emptyTip.remove();
+
+      let h = `<select class="exec-select"><option value="">選擇執行同仁</option>${allData.execOptions.map(opt=>`<option value="${opt}">${opt}</option>`)}</select>`;
+      const div = document.createElement('div');
+      div.className = 'row-input has-content';
+      div.innerHTML = `
+        <div class="input-wrapper" style="flex:1;"><input type="text" value="" placeholder="請輸入指定任務名稱..."></div>
+        <div class="select-group">${h}<button class="btn-reset btn-animate" style="background:#ffebee; color:#c62828;" onclick="this.closest('.row-input').remove();">🗑️</button></div>
+      `;
+      listDiv.appendChild(div);
+    }
+
+    function renderSlide() {
+      const ctx = document.getElementById('myChart').getContext('2d');
+      const titleEl = document.getElementById('slide-title');
+      const contentEl = document.getElementById('slide-content');
+      const totalBadge = document.getElementById('slide-total-badge');
+      const dateBadge = document.getElementById('slide-start-date');
+
+      if (myPieChart) myPieChart.destroy();
+
+      if (currentSlide === 0) {
+        titleEl.innerText = "⭐ 全體諮詢量總覽";
+        dateBadge.innerText = `📅 資料起始: ${serviceStartDate}`;
+        dateBadge.style.display = 'block';
+
+        const labels = statsData.map(r => r[0]); 
+        const sData = statsData.map(r => r[1]); 
+        const grandTotal = sData.reduce((a, b) => a + b, 0);
+        
+        totalBadge.innerText = `總資料數: ${grandTotal}`;
+        totalBadge.style.display = 'block';
+
+        myPieChart = new Chart(ctx, {
+          type: 'doughnut',
+          data: { labels: labels, datasets: [{ data: sData, backgroundColor: ['#ffab91', '#80cbc4', '#90caf9', '#ce93d8', '#fff59d', '#a5d6a7', '#bcaaa4', '#eeeeee'], borderWidth: 2, borderColor: '#ffffff' }] },
+          options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { boxWidth: 12 } } }, maintainAspectRatio: false }
+        });
+
+        let html = '';
+        statsData.forEach(r => { 
+          const pending = r[1] - r[3];
+          let lastCareTime = r[4];
+          if (lastCareTime && typeof lastCareTime === 'object') lastCareTime = lastCareTime.toString();
+          lastCareTime = (lastCareTime && lastCareTime !== "null") ? lastCareTime.split('T')[0] : '無紀錄';
+
+          html += `
+              <div class="stat-row">
+                <div class="stat-name" style="font-weight:bold;">${r[0]}</div>
+                  <div class="stat-val" style="font-size: 13px; line-height: 1.6; text-align:right;"> 
+                       總數 <b style="font-size: 15px;">${r[1]}</b> <span style="color:#eee; margin:0 3px;">|</span>
+                       關懷 <span style="color:#f2b63f; font-weight:bold;">${r[2]}</span> <span style="color:#eee; margin:0 3px;">|</span>
+                       結案 <span style="color:#43a047; font-weight:bold;">${r[3]}</span> <span style="color:#eee; margin:0 3px;">|</span>
+                       <span style="background:#fff1f0; padding:2px 5px; border-radius:5px;">
+                       待結案 <span style="color:#d9534f; font-weight:bold; font-size: 14px;">${pending}</span>
+                     </span>
+                <div style="font-size:11px; color:#999; margin-top:4px;">最後關懷：${lastCareTime}</div>
+            </div>
+            </div>`; 
+        });
+        contentEl.innerHTML = html;
+
+      } else {
+        dateBadge.style.display = 'none'; 
+        const pData = statsData[currentSlide - 1]; 
+        titleEl.innerText = `👤 ${pData[0]} 的服務狀況`;
+        const total = pData[1], care = pData[2], closed = pData[3], processing = total - closed;
+        
+        totalBadge.innerText = `總資料數: ${total}`;
+        totalBadge.style.display = 'block';
+
+        myPieChart = new Chart(ctx, {
+          type: 'pie',
+          data: { 
+            labels: ['關懷中', '已結案', '待結案'], 
+            datasets: [{ data: [care, closed, processing], backgroundColor: ['#f2b63f', '#43a047', '#e0d7d7'], borderWidth: 2, borderColor: '#ffffff' }] 
+          },
+          options: { responsive: true, plugins: { legend: { position: 'bottom' } }, maintainAspectRatio: false }
+        });
+        
+        contentEl.innerHTML = `
+          <div class="stat-row" style="justify-content:center; padding: 15px 0; border-bottom: 2px solid #eee;">
+            <div style="text-align:center;">
+              <div style="font-size:36px; color:var(--primary-color); font-weight:bold;">${total}</div>
+              <div style="font-size:13px; color:#78909c;">總服務案件</div>
+            </div>
+          </div>
+          <div class="stat-row"><div class="stat-name">🚩 關懷中</div><div class="stat-val" style="color:#f0a718; font-size:16px; font-weight:bold;">${care}</div></div>
+          <div class="stat-row"><div class="stat-name">✅ 已結案</div><div class="stat-val" style="color:#43a047; font-size:16px; font-weight:bold;">${closed}</div></div>
+          <div class="stat-row"><div class="stat-name">⏳ 待結案</div><div class="stat-val" style="color:#d9534f; font-size:16px; font-weight:bold;">${processing}</div></div>
+          <div class="stat-row" style="border-top:1px dashed #eee; margin-top:5px; padding-top:10px;">
+            <div class="stat-name" style="font-size:14px; color:#999;">最後關懷時間</div>
+            <div class="stat-val" style="font-size:14px; color:#444; font-weight:bold;">${pData[4]}</div>
+          </div>
+        `;
+      }
+    }
+
+    function shareStatsAsImage() { 
+      const container = document.getElementById('stats-container'); 
+      showMask('產生圖片中...'); 
+
+      html2canvas(container, { 
+        scale: 2, 
+        backgroundColor: '#ffffff', 
+        useCORS: true, 
+        onclone: function(clonedDoc) {
+          const el = clonedDoc.getElementById('stats-container');
+          if (el) {
+            el.classList.remove('fade-in'); 
+            el.style.animation = 'none';    
+            el.style.opacity = '1';          
+            el.querySelectorAll('button').forEach(b => b.style.display = 'none'); 
+          }
+        }
+      }).then(canvas => { 
+        hideMask();
+        canvas.toBlob(blob => { 
+          const title = document.getElementById('slide-title').innerText.replace(/\s+/g, '_'); 
+          const file = new File([blob], `統計_${title}.png`, { type: 'image/png' }); 
+          if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) { 
+            navigator.share({ files: [file], title: '服務統計分享' }).catch(e => console.log(e)); 
+          } else { 
+            const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = file.name; link.click(); 
+            alert('截圖已下載完成！\n請至電腦的「下載」資料夾查看，即可直接拖曳至 LINE 傳送。');
+          } 
+        }, 'image/png'); 
+      });
+    }
+        
+    function changeSlide(dir) { 
+      const max = statsData.length; currentSlide += dir; if (currentSlide < 0) currentSlide = max; if (currentSlide > max) currentSlide = 0; renderSlide(); 
+    }
+        
+    
+        
+    function goHome() { 
+      switchContainer('welcome-container', null, '工作任務維護');
+    }
+        
+    function showMask(text) { document.getElementById('loader-mask').style.display = 'flex'; document.getElementById('loader-text').innerText = text; }
+    function hideMask() { document.getElementById('loader-mask').style.display = 'none'; }
+
+    function applyPermissions(perm) { 
+      const p = (perm || "").toString().toUpperCase().replace(/\s/g, ""); 
+      const togglePerm = (id, char) => {
+        const el = document.getElementById(id);
+        if(el) el.style.display = p.includes(char) ? '' : 'none'; 
+      };
+      
+      togglePerm('btn-weekly', 'A');
+      togglePerm('btn-monthly', 'B');
+      togglePerm('btn-assign', 'C');
+      togglePerm('btn-stats', 'D');
+      togglePerm('btn-loss', 'E');
+      togglePerm('btn-myopia', 'F');
+      togglePerm('btn-twoday', 'G');
+      togglePerm('btn-doctor', 'I');
+      togglePerm('btn-conversion', 'J'); 
+    }
+        
+    let myopiaCharts = {};
+    let currentMyopiaData = null; 
+
+    const COLORS = { OK: '#1976D2', Defocus: '#FFA000', Soft: '#c6a1e3', Stop: '#fa8488', Safe: '#4CAF50', Warn: '#FF9800', Danger: '#F44336' };
+    Chart.register(ChartDataLabels);
+
+    function openMyopia() {
+      currentMode = 'myopia';
+      switchContainer('myopia-container', 'btn-myopia', '兒控統計分析');
+      loadMyopiaData();
+    }
+
+    async function loadMyopiaData() {
+      showMask('數據分析中...');
+      try {
+        const { data, error } = await _supabase.from('children_control').select('*');
+        if (error) throw error;
+
+        const list = data || [];
+        const currentRocYear = new Date().getFullYear() - 1911;
+
+        const stats = {
+          total: { OK: 0, Defocus: 0, Soft: 0 },
+          status: {
+            OK: { active: 0, stop: 0 },
+            Defocus: { active: 0, stop: 0 },
+            Soft: { active: 0, stop: 0 }
+          },
+          days: { safe: 0, warn: 0, danger: 0 },
+          age: {}
+        };
+
+        const initAgeObj = () => ({ OK: { total: 0, active: 0 }, Defocus: { total: 0, active: 0 }, Soft: { total: 0, active: 0 } });
+        for (let i = 0; i <= 100; i++) stats.age[i] = initAgeObj();
+        stats.age["Other"] = initAgeObj();
+
+        list.forEach(r => {
+          let pType = 'OK';
+          const prod = r.product || '';
+          if (prod.includes('離焦') || prod.includes('Defocus')) pType = 'Defocus';
+          else if (prod.includes('軟') || prod.includes('Soft')) pType = 'Soft';
+
+          const isActive = (r.is_active !== false);
+          stats.total[pType]++;
+          if (isActive) stats.status[pType].active++;
+          else stats.status[pType].stop++;
+
+          const days = parseInt(r.days_not_back) || 0;
+          if (days <= 90) stats.days.safe++;
+          else if (days <= 120) stats.days.warn++;
+          else stats.days.danger++;
+
+          let age = "Other";
+          if (r.birthday && r.birthday.includes('/')) {
+            const bYear = parseInt(r.birthday.split('/')[0]);
+            if (!isNaN(bYear)) age = Math.max(0, currentRocYear - bYear);
+          }
+
+          if (stats.age[age]) {
+            stats.age[age][pType].total++;
+            if (isActive) stats.age[age][pType].active++;
+          }
+        });
+
+        renderMyopiaCharts(stats);
+      } catch (e) {
+        hideMask();
+        alert("兒控分析失敗: " + e.message);
+      }
+    }
+
+    function renderMyopiaCharts(data) {
+      hideMask();
+      currentMyopiaData = data;
+      updateProductChart(); 
+      updateStatusChart();  
+      updateAgeChart();     
+      updateDaysChart();    
+    }
+
+    const commonChartOptions = {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, padding: 15 } }, datalabels: { color: '#ffffff', font: { weight: 'bold', size: 13 }, textStrokeColor: '#546e7a', textStrokeWidth: 3, textShadowBlur: 4, textShadowColor: 'rgba(0, 0, 0, 0.4)', formatter: (value) => value > 0 ? value : '' } }
+    };
+
+    function updateProductChart() {
+      if (!currentMyopiaData) return;
+      const ctx = document.getElementById('chartProduct');
+      const onlyActive = document.getElementById('toggle-product-active').checked;
+      const d = currentMyopiaData.status; 
+      if (myopiaCharts['chartProduct']) myopiaCharts['chartProduct'].destroy();
+      const getVal = (key) => onlyActive ? d[key].active : (d[key].active + d[key].stop);
+      const valOK = getVal('OK'), valDefocus = getVal('Defocus'), valSoft = getVal('Soft'), total = valOK + valDefocus + valSoft;
+
+      document.getElementById('total-product').innerText = onlyActive ? `使用中: ${total}人` : `總計: ${total}人`;
+
+      myopiaCharts['chartProduct'] = new Chart(ctx, {
+        type: 'doughnut', data: { labels: ['OK 塑型', '離焦鏡片', '軟式控制'], datasets: [{ data: [valOK, valDefocus, valSoft], backgroundColor: [COLORS.OK, COLORS.Defocus, COLORS.Soft] }] },
+        options: { ...commonChartOptions, plugins: { ...commonChartOptions.plugins, datalabels: { ...commonChartOptions.plugins.datalabels, formatter: (value) => { if (value === 0) return ''; let percentage = (total > 0) ? (value * 100 / total).toFixed(0) + "%" : "0%"; return `${value}人\n(${percentage})`; } } } }
+      });
+    }
+
+    function updateStatusChart() {
+      if (!currentMyopiaData) return;
+      const ctx = document.getElementById('chartStatus'), d = currentMyopiaData.status;
+      if (myopiaCharts['chartStatus']) myopiaCharts['chartStatus'].destroy();
+      const total = (d.OK.active + d.OK.stop) + (d.Defocus.active + d.Defocus.stop) + (d.Soft.active + d.Soft.stop);
+      document.getElementById('total-status').innerText = `總計: ${total}人`;
+
+      myopiaCharts['chartStatus'] = new Chart(ctx, {
+        type: 'bar',
+        data: { labels: ['OK', '離焦', '軟控'], datasets: [ { label: '使用中', data: [d.OK.active, d.Defocus.active, d.Soft.active], backgroundColor: [COLORS.OK, COLORS.Defocus, COLORS.Soft] }, { label: '停止更新', data: [d.OK.stop, d.Defocus.stop, d.Soft.stop], backgroundColor: COLORS.Stop } ] },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, padding: 15 } }, datalabels: { color: '#f5f5f5', font: { weight: 'bold', size: 12 }, textStrokeColor: '#546e7a', textStrokeWidth: 2, formatter: (value) => value > 0 ? value : '' } }, scales: { x: { stacked: true }, y: { stacked: true, grace: '20%', ticks: { callback: v => (v % 1 === 0 ? v : '') } } } }
+      });
+    }
+
+    function updateAgeChart() {
+      if (!currentMyopiaData) return;
+      const ctx = document.getElementById('chartAge'), onlyActive = document.getElementById('toggle-age-active').checked, data = currentMyopiaData;
+      if (myopiaCharts['chartAge']) myopiaCharts['chartAge'].destroy();
+
+      const allAges = Object.keys(data.age).filter(k => k !== 'Other').map(Number).sort((a,b)=>a-b);
+      let maxAge = 0, minAge = 100;
+
+      allAges.forEach(a => {
+        const ok = onlyActive ? data.age[a].OK.active : data.age[a].OK.total, def = onlyActive ? data.age[a].Defocus.active : data.age[a].Defocus.total, soft = onlyActive ? data.age[a].Soft.active : data.age[a].Soft.total;
+        if ((ok + def + soft) > 0) { if (a > maxAge) maxAge = a; if (a < minAge) minAge = a; }
+      });
+
+      if (maxAge === 0) { minAge = 6; maxAge = 18; }
+      let startChartAge = Math.max(0, minAge - 1); 
+      const displayAges = [];
+      for(let i = startChartAge; i <= maxAge; i++) displayAges.push(i);
+
+      const getData = (age, type) => { if (!data.age[age]) return 0; return onlyActive ? data.age[age][type].active : data.age[age][type].total; };
+
+      let currentTotal = 0;
+      displayAges.forEach(a => { currentTotal += getData(a, 'OK') + getData(a, 'Defocus') + getData(a, 'Soft'); });
+      document.getElementById('total-age').innerText = onlyActive ? `使用中: ${currentTotal}人` : `總計: ${currentTotal}人`;
+
+      myopiaCharts['chartAge'] = new Chart(ctx, {
+        type: 'line',
+        data: { labels: displayAges.map(a => a + '歲'), datasets: [ { label: 'OK', data: displayAges.map(a => getData(a, 'OK')), borderColor: COLORS.OK, backgroundColor: COLORS.OK, tension: 0.3 }, { label: '離焦', data: displayAges.map(a => getData(a, 'Defocus')), borderColor: COLORS.Defocus, backgroundColor: COLORS.Defocus, tension: 0.3 }, { label: '軟控', data: displayAges.map(a => getData(a, 'Soft')), borderColor: COLORS.Soft, backgroundColor: COLORS.Soft, tension: 0.3 } ] },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, padding: 15 } }, datalabels: { align: 'top', anchor: 'end', color: '#555', offset: 4, font: { weight: 'bold', size: 12 }, formatter: (value) => value > 0 ? value : '' } }, scales: { y: { beginAtZero: true, grace: '10%', ticks: { callback: v => (v % 1 === 0 ? v : '') } } } }
+      });
+    }
+
+    function updateDaysChart() {
+      if (!currentMyopiaData) return;
+      const ctx = document.getElementById('chartDays'), source = currentMyopiaData.days;
+      if (myopiaCharts['chartDays']) myopiaCharts['chartDays'].destroy();
+      const total = source.safe + source.warn + source.danger;
+      document.getElementById('total-days').innerText = `總計: ${total}人`;
+
+      myopiaCharts['chartDays'] = new Chart(ctx, {
+        type: 'bar',
+        data: { labels: ['90天內 (安全)', '91-120天 (注意)', '121天以上 (警示)'], datasets: [{ label: '人數', data: [source.safe, source.warn, source.danger], backgroundColor: [COLORS.Safe, COLORS.Warn, COLORS.Danger] }] },
+        options: { ...commonChartOptions, indexAxis: 'y', plugins: { legend: { display: false }, datalabels: { ...commonChartOptions.plugins.datalabels, color: '#fff' } }, scales: { x: { ticks: { callback: v => (v % 1 === 0 ? v + " 人" : '') } } } }
+      });
+    }
+
+    let lossCharts = {};
+
+    function openLoss() {
+      currentMode = 'loss';
+      switchContainer('loss-container', 'btn-loss', '失聯關懷成效統計');
+      const now = new Date();
+      const sStr = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 10);
+      const eStr = now.toISOString().slice(0, 10);
+      document.getElementById('loss-date-start').value = sStr;
+      document.getElementById('loss-date-end').value = eStr;
+      loadLossData();
+    }
+
+    async function loadLossData() {
+      const s = document.getElementById('loss-date-start').value, e = document.getElementById('loss-date-end').value;
+      showMask('成效計算中...');
+      try {
+        const { data, error } = await _supabase.from('consultations').select('*');
+        if (error) throw error;
+
+        const start = new Date(s); start.setHours(0,0,0,0);
+        const end = new Date(e); end.setHours(23,59,59,999);
+
+        const stats = {
+          totalCount: 0, caredCount: 0, bookedCount: 0, closedCount: 0, otherClosedCount: 0, staffData: {}
+        };
+
+        (data || []).forEach(r => {
+          const cDate = r.created_at ? new Date(r.created_at) : null;
+          if (cDate && cDate >= start && cDate <= end) {
+            stats.totalCount++;
+            const status = String(r.status || '').trim();
+            const booked = String(r.is_appoint || '').trim();
+            const staff = String(r.care_staff || r.staff || '未指派').trim();
+
+            if (status === '已關懷') stats.caredCount++;
+            if (booked === '是') stats.bookedCount++;
+            if (status === '締結') stats.closedCount++;
+            if (status === '其他') stats.otherClosedCount++;
+
+            if (!stats.staffData[staff]) stats.staffData[staff] = { cared: 0, booked: 0, closed: 0, other: 0 };
+            if (status === '已關懷') {
+              stats.staffData[staff].cared++;
+              if (booked === '是') stats.staffData[staff].booked++;
+              if (status === '締結') stats.staffData[staff].closed++;
+              if (status === '其他') stats.staffData[staff].other++;
+            }
+          }
+        });
+
+        renderLossCharts(stats);
+      } catch (err) {
+        hideMask();
+        alert("失聯統計失敗: " + err.message);
+      }
+    }
+
+    function renderLossCharts(data) {
+      hideMask();
+      const lossOpt = { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, padding: 15 } }, datalabels: { color: '#ffffff', font: { weight: 'bold', size: 13 }, textStrokeColor: '#546e7a', textStrokeWidth: 3, textShadowBlur: 4, textShadowColor: 'rgba(0, 0, 0, 0.4)', formatter: (v) => v > 0 ? v : '' } } };
+      ['chartLossProgress', 'chartLossRates', 'chartStaffPerform'].forEach(id => { if(lossCharts[id]) lossCharts[id].destroy(); });
+
+      document.getElementById('loss-total-1').innerText = `資料總數: ${data.totalCount}`;
+      document.getElementById('loss-total-2').innerText = `已關懷: ${data.caredCount}`;
+
+      lossCharts['chartLossProgress'] = new Chart(document.getElementById('chartLossProgress'), {
+        type: 'doughnut',
+        data: { labels: ['已關懷', '待關懷', '其他結案'], datasets: [{ data: [data.caredCount - data.otherClosedCount, Math.max(0, data.totalCount - data.caredCount), data.otherClosedCount], backgroundColor: ['#43a047', '#eceff1', '#ce93d8'] }] },
+        options: { ...lossOpt, plugins: { ...lossOpt.plugins, datalabels: { ...lossOpt.plugins.datalabels, formatter: (v) => v > 0 ? `${v}人\n(${(v*100/(data.totalCount || 1)).toFixed(0)}%)` : '' } } }
+      });
+      
+      const base = data.caredCount || 1, bookRate = ((data.bookedCount / base) * 100).toFixed(0), closeRate = ((data.closedCount / base) * 100).toFixed(0), otherRate = ((data.otherClosedCount / base) * 100).toFixed(0);
+
+      lossCharts['chartLossRates'] = new Chart(document.getElementById('chartLossRates'), {
+        type: 'bar',
+        data: { labels: ['其他結案', '預約回店', '成功締結'], datasets: [{ label: '人數', data: [data.otherClosedCount, data.bookedCount, data.closedCount], backgroundColor: ['#ce93d8', '#fb8c00', '#1e88e5'], barPercentage: 0.6 }] },
+        options: { ...lossOpt, plugins: { ...lossOpt.plugins, legend: { display: false }, datalabels: { ...lossOpt.plugins.datalabels, anchor: 'end', align: 'end', offset: -5, formatter: (value, ctx) => { if(value === 0) return ''; if(ctx.dataIndex === 0) return `${value}人\n(其他${otherRate}%)`; if(ctx.dataIndex === 1) return `${value}人\n(預約${bookRate}%)`; if(ctx.dataIndex === 2) return `${value}人\n(締結${closeRate}%)`; } } }, scales: { y: { grace: '15%', ticks: { callback: v => v+'人' } }, x: { grid: { display: false } } } }
+      });
+
+      const staffNames = Object.keys(data.staffData);
+      lossCharts['chartStaffPerform'] = new Chart(document.getElementById('chartStaffPerform'), {
+        type: 'bar',
+        data: { labels: staffNames, datasets: [ { label: '預約力%', data: staffNames.map(n=>data.staffData[n].cared?(data.staffData[n].booked/data.staffData[n].cared*100).toFixed(1):0), backgroundColor: '#ffd54f' }, { label: '締結力%', data: staffNames.map(n=>data.staffData[n].cared?(data.staffData[n].closed/data.staffData[n].cared*100).toFixed(1):0), backgroundColor: '#90caf9' }, { label: '其他結案%', data: staffNames.map(n=>data.staffData[n].cared?(data.staffData[n].other/data.staffData[n].cared*100).toFixed(1):0), backgroundColor: '#ce93d8' } ] },
+        options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { datalabels: { anchor: 'end', align: 'right', color: '#444', textStrokeColor: '#fff', textStrokeWidth: 2, formatter: v => v+'%' } }, scales: { x: { max: 100, ticks: { callback: v => v+'%' } } } }
+      });
+    }
+
+    function shareLossImage() {
+      const container = document.getElementById('loss-container');
+      showMask('產生圖片中...');
+
+      html2canvas(container, { 
+        scale: 2, 
+        backgroundColor: '#ffffff', 
+        useCORS: true, 
+        onclone: function(clonedDoc) {
+          const el = clonedDoc.getElementById('loss-container');
+          if (el) {
+            el.classList.remove('fade-in'); 
+            el.style.animation = 'none'; 
+            el.style.opacity = '1'; 
+            el.querySelectorAll('button').forEach(b => b.style.display = 'none');
+          }
+        }
+      }).then(canvas => {
+        hideMask();
+        canvas.toBlob(blob => {
+          const dateStr = new Date().toISOString().slice(0,10);
+          const file = new File([blob], `失聯關懷統計_${dateStr}.png`, { type: 'image/png' });
+          if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) { 
+            navigator.share({ files: [file], title: '失聯關懷成效統計' }).catch(e => console.log(e)); 
+          } else { 
+            const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = file.name; link.click(); 
+            alert('截圖已下載完成！\n請至電腦的「下載」資料夾查看，即可直接拖曳至 LINE 傳送。');
+          } 
+        }, 'image/png');
+      });
+    }
+
+    function shareMyopiaImage() {
+      const container = document.getElementById('myopia-container');
+      showMask('產生圖片中...');
+
+      html2canvas(container, { 
+        scale: 2, 
+        backgroundColor: '#ffffff', 
+        useCORS: true, 
+        onclone: function(clonedDoc) {
+          const el = clonedDoc.getElementById('myopia-container');
+          if (el) {
+            el.classList.remove('fade-in'); 
+            el.style.animation = 'none'; 
+            el.style.opacity = '1'; 
+            el.querySelectorAll('button').forEach(b => b.style.display = 'none');
+          }
+        }
+      }).then(canvas => {
+        hideMask(); 
+        canvas.toBlob(blob => {
+          const dateStr = new Date().toISOString().slice(0,10);
+          const file = new File([blob], `兒控統計_${dateStr}.png`, { type: 'image/png' });
+          if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) { 
+            navigator.share({ files: [file], title: '兒控使用統計' }).catch(e => console.log(e)); 
+          } else { 
+            const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = file.name; link.click(); 
+            alert('截圖已下載完成！\n請至電腦的「下載」資料夾查看，即可直接拖曳至 LINE 傳送。');
+          } 
+        }, 'image/png');
+      });
+    }
+
+    async function openTwoDay() {
+      currentMode = 'twoday';
+      switchContainer('twoday-container', 'btn-twoday', '二日數據計算');
+      showMask('數據載入中...');
+      
+      try {
+        const now = new Date();
+        const pad = n => String(n).padStart(2, '0');
+        const todayStr = `${now.getFullYear()}/${pad(now.getMonth()+1)}/${pad(now.getDate())}`;
+        
+        const yest = new Date(now); yest.setDate(yest.getDate() - 1);
+        const yestStr = `${yest.getFullYear()}/${pad(yest.getMonth()+1)}/${pad(yest.getDate())}`;
+
+        const { data: staffData } = await _supabase.from('system_settings').select('value').eq('key', 'staff_list').single();
+        const staffList = (staffData && staffData.value) ? staffData.value : [];
+
+        const { data: shiftData } = await _supabase.from('schedules').select('*').eq('date', todayStr);
+        const { data: consultData } = await _supabase.from('consultations').select('*');
+
+        const twoDayList = staffList.map(name => {
+          const shift = (shiftData || []).find(s => s.staff_name === name);
+          const isDuty = shift && shift.shift_type && shift.shift_type !== '休假';
+
+          const tItems = (consultData || []).filter(c => (c.care_staff === name || c.staff === name) && String(c.created_at || '').startsWith(todayStr.replace(/\//g, '-')));
+          const yItems = (consultData || []).filter(c => (c.care_staff === name || c.staff === name) && String(c.created_at || '').startsWith(yestStr.replace(/\//g, '-')));
+
+          return {
+            name: name,
+            isDuty: isDuty,
+            today: {
+              unanswered: tItems.filter(c => c.status === '待處理').length,
+              connected: tItems.filter(c => c.status === '已關懷').length,
+              closed: tItems.filter(c => c.status === '締結' || c.status === '其他').length,
+              consult: tItems.length
+            },
+            yesterday: {
+              unanswered: yItems.filter(c => c.status === '待處理').length,
+              connected: yItems.filter(c => c.status === '已關懷').length,
+              closed: yItems.filter(c => c.status === '締結' || c.status === '其他').length,
+              consult: yItems.length
+            }
+          };
+        });
+
+        renderTwoDayStats(twoDayList);
+      } catch (e) {
+        hideMask();
+        alert("二日數據載入失敗: " + e.message);
+      }
+    }
+
+    function renderTwoDayStats(data) {
+      hideMask();
+      const container = document.getElementById('twoday-content');
+      if (!data || data.length === 0) { container.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:20px; color:#999;">目前沒有數據</div>'; return; }
+
+      const now = new Date(), timeStr = now.getFullYear() + '/' + (now.getMonth()+1).toString().padStart(2, '0') + '/' + now.getDate().toString().padStart(2, '0') + ' ' + now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+
+      let html = '';
+      data.forEach((p, index) => { 
+        const valClass = (v) => v > 0 ? 'stat-val highlight' : 'stat-val', cardId = `card-${index}`;
+        const dutyBadge = p.isDuty ? `<span style="background:#ff5252; color:white; font-size:12px; padding:2px 6px; border-radius:4px; margin-left:8px; vertical-align:middle;">值班</span>` : ``;
+
+        html += `
+          <div class="twoday-card" id="${cardId}" style="position:relative; padding-bottom:30px;">
+            <div class="box-header" style="margin-bottom:10px;">
+              <div style="font-size:18px; font-weight:bold; color:var(--primary-color);">👤 ${p.name} ${dutyBadge}</div>
+              <button onclick="shareSingleCard('${cardId}', '${p.name}')" style="background:#00c300; color:white; border:none; padding:4px 10px; border-radius:15px; font-size:13px; cursor:pointer; box-shadow: 0 2px 5px rgba(0,195,0,0.2);">📸 分享</button>
+            </div>
+            <div class="twoday-body">
+              <div class="day-column today">
+                <div class="column-title bg-today">▶️ 今天</div>
+                <div class="stat-item"><span class="stat-label">失聯未接</span> <span class="${valClass(p.today.unanswered)}">${p.today.unanswered}</span></div>
+                <div class="stat-item"><span class="stat-label">失聯接通</span> <span class="${valClass(p.today.connected)}">${p.today.connected}</span></div>
+                <div class="stat-item"><span class="stat-label">失聯結案</span> <span class="${valClass(p.today.closed)}">${p.today.closed}</span></div>
+                <div class="stat-item" style="border:none;"><span class="stat-label">諮詢關懷</span> <span class="${valClass(p.today.consult)}">${p.today.consult}</span></div>
+              </div>
+              <div class="day-column yesterday">
+                <div class="column-title bg-yest">⏮ 昨天</div>
+                <div class="stat-item"><span class="stat-label">失聯未接</span> <span class="${valClass(p.yesterday.unanswered)}">${p.yesterday.unanswered}</span></div>
+                <div class="stat-item"><span class="stat-label">失聯接通</span> <span class="${valClass(p.yesterday.connected)}">${p.yesterday.connected}</span></div>
+                <div class="stat-item"><span class="stat-label">失聯結案</span> <span class="${valClass(p.yesterday.closed)}">${p.yesterday.closed}</span></div>
+                <div class="stat-item" style="border:none;"><span class="stat-label">諮詢關懷</span> <span class="${valClass(p.yesterday.consult)}">${p.yesterday.consult}</span></div>
+              </div>
+            </div>
+            <div style="position:absolute; bottom:8px; right:15px; font-size:11px; color:#aaa;">查詢時間: ${timeStr}</div>
+          </div>`;
+      });
+      container.innerHTML = html;
+    }
+
+    function shareTwoDayImage() {
+      const container = document.getElementById('twoday-container');
+      showMask('產生圖片中...');
+
+      html2canvas(container, { 
+        scale: 2, 
+        backgroundColor: '#ffffff', 
+        useCORS: true, 
+        onclone: function(clonedDoc) {
+          const el = clonedDoc.getElementById('twoday-container');
+          if (el) {
+            el.classList.remove('fade-in'); 
+            el.style.animation = 'none'; 
+            el.style.opacity = '1'; 
+            el.querySelectorAll('button').forEach(b => b.style.display = 'none');
+          }
+        }
+      }).then(canvas => {
+        hideMask();
+        canvas.toBlob(blob => { 
+          const dateStr = new Date().toISOString().slice(0,10);
+          const file = new File([blob], `二日數據_${dateStr}.png`, { type: 'image/png' }); 
+          if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) { 
+            navigator.share({ files: [file], title: '二日數據報表' }).catch(e => console.log(e)); 
+          } else { 
+            const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = file.name; link.click(); 
+            alert('截圖已下載完成！\n請至電腦的「下載」資料夾查看，即可直接拖曳至 LINE 傳送。');
+          } 
+        }, 'image/png');
+      });
+    }
+        
+    function shareSingleCard(elementId, name) {
+      const cardElement = document.getElementById(elementId), btn = cardElement.querySelector('button');
+      if(btn) btn.style.display = 'none';
+      showMask('📸 製作卡片中...');
+      html2canvas(cardElement, { scale: 2, backgroundColor: '#ffffff', useCORS: true }).then(canvas => {
+        if(btn) btn.style.display = 'inline-block';
+        hideMask();
+        canvas.toBlob(blob => {
+          const fileName = `${name}_二日數據_${new Date().toISOString().slice(0,10)}.png`, file = new File([blob], fileName, { type: 'image/png' });
+          if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) { navigator.share({ files: [file], title: `${name} 數據報表` }).catch(err => console.log(err)); } else { const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = fileName; link.click(); }
+        }, 'image/png');
+      });
+    }
+
+    let globalConversionRes = null;
+
+    function openConversion() {
+      currentMode = 'conversion';
+      switchContainer('conversion-container', 'btn-conversion', '締結率計算');
+      
+      const now = new Date();
+      const lastMonth1st = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const sStr = lastMonth1st.getFullYear() + '-' + String(lastMonth1st.getMonth() + 1).padStart(2, '0') + '-01';
+      const eStr = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+      
+      document.getElementById('conversion-date-start').value = sStr;
+      document.getElementById('conversion-date-end').value = eStr;
+      loadConversionData();
+    }
+
+    async function loadConversionData() {
+      const s = document.getElementById('conversion-date-start').value, e = document.getElementById('conversion-date-end').value;
+      showMask('成效計算中...');
+
+      try {
+        const { data, error } = await _supabase
+          .from('consultations')
+          .select('name, staff, care_staff, status, order_no, amount, sales_note, note, created_at')
+          .gte('created_at', `${s}T00:00:00`)
+          .lte('created_at', `${e}T23:59:59`);
+
+        if (error) throw error;
+
+        const statsContainer = {};
+        const staffList = [];
+
+        (data || []).forEach(row => {
+          const staffName = row.care_staff || row.staff || "未指定人員";
+          const customerName = row.name || "未登記";
+          const status = row.status || "待處理";
+          const mainText = (status === "締結") ? (row.order_no || row.sales_note || "無單號") : (row.note || "無");
+          const amount = parseFloat(row.amount) || 0;
+
+          if (!statsContainer[staffName]) {
+            statsContainer[staffName] = { total: 0, closed: 0, sumAmount: 0, maxAmount: 0, details: [] };
+            staffList.push(staffName);
+          }
+
+          const group = statsContainer[staffName];
+          group.total++;
+          if (status === "締結") group.closed++;
+          group.sumAmount += amount;
+          if (amount > group.maxAmount) group.maxAmount = amount;
+
+          group.details.push({
+            customerName: customerName,
+            mainText: mainText,
+            status: status,
+            amount: amount
+          });
+        });
+
+        staffList.forEach(staff => {
+          const g = statsContainer[staff];
+          g.rate = g.total > 0 ? ((g.closed / g.total) * 100).toFixed(1) : "0.0";
+          g.avgAmount = g.total > 0 ? Math.round(group.sumAmount / group.total) : 0;
+        });
+
+        globalConversionRes = {
+          data: statsContainer,
+          staffList: staffList,
+          updateDate: new Date().toLocaleDateString('zh-TW')
+        };
+
+        globalConversionRes.staffList.forEach(st => {
+          if(globalConversionRes.data[st]) {
+            globalConversionRes.data[st].originalDetails = [...globalConversionRes.data[st].details];
+            if (st.indexOf('未銷') !== -1 || st.indexOf('未指定') !== -1) {
+              globalConversionRes.data[st].details.forEach((d, dIdx) => {
+                d.fromSpecialStaff = st;
+                d.originalIndex = dIdx;
+              });
+            }
+          }
+        });
+
+        renderConversionStats(globalConversionRes);
+        hideMask();
+      } catch (e) {
+        hideMask();
+        alert("成效計算失敗: " + e.message);
+      }
+    }
+
+    window.reassignItem = function(sourceStaff, detailIndex, targetStaff, selectEl) {
+      if (!globalConversionRes) return;
+      
+      const detailItem = globalConversionRes.data[sourceStaff].details[detailIndex];
+      const oldTarget = detailItem.assignedTo;
+      detailItem.assignedTo = targetStaff;
+      
+      globalConversionRes.staffList.forEach(s => {
+        const item = globalConversionRes.data[s];
+        if (item && item.originalDetails) {
+          if (s.indexOf('未銷') === -1 && s.indexOf('未指定') === -1) {
+            item.details = [...item.originalDetails];
+          }
+        }
+      });
+      
+      globalConversionRes.staffList.forEach(s => {
+        if (s.indexOf('未銷') !== -1 || s.indexOf('未指定') !== -1) {
+          const specialItem = globalConversionRes.data[s];
+          if (specialItem && specialItem.details) {
+            specialItem.details.forEach(d => {
+              if (d.assignedTo) {
+                if (!globalConversionRes.data[d.assignedTo]) {
+                  globalConversionRes.data[d.assignedTo] = { total: 0, closed: 0, sumAmount: 0, maxAmount: 0, details: [] };
+                  if (!globalConversionRes.staffList.includes(d.assignedTo)) {
+                    globalConversionRes.staffList.push(d.assignedTo);
+                  }
+                }
+                globalConversionRes.data[d.assignedTo].details.push(d);
+              }
+            });
+          }
+        }
+      });
+      
+      globalConversionRes.staffList.forEach(s => { recalcStaffStats(s); });
+      
+      const itemUniqueId = `reassigned-card-${sourceStaff.replace(/\s+/g, '_')}-${detailIndex}`;
+      
+      if (oldTarget) {
+        const oldCard = document.getElementById(itemUniqueId);
+        if (oldCard) oldCard.remove();
+      }
+      
+      if (selectEl) {
+        const rowEl = selectEl.closest('.conversion-detail-row');
+        if (rowEl) {
+          if (targetStaff !== '') rowEl.classList.add('is-reassigned');
+          else rowEl.classList.remove('is-reassigned');
+        }
+      }
+      
+      if (targetStaff !== '') {
+        const targetStaffIndex = globalConversionRes.staffList.indexOf(targetStaff);
+        if (targetStaffIndex !== -1) {
+          const targetCardBox = document.getElementById(`conversion-card-${targetStaffIndex}`);
+          if (targetCardBox) {
+            const allDetailsInBox = targetCardBox.querySelectorAll('details');
+            const internalDetailsEl = allDetailsInBox.length > 1 ? allDetailsInBox[1] : allDetailsInBox[0];
+            const targetDetailsContainer = internalDetailsEl ? internalDetailsEl.querySelector('div') : null;
+            
+            if (targetDetailsContainer) {
+              let targetCard = document.getElementById(itemUniqueId);
+              if (!targetCard) {
+                targetCard = document.createElement('div');
+                targetCard.id = itemUniqueId;
+                targetCard.className = 'conversion-detail-row is-reassigned';
+                targetCard.style.cssText = 'display:flex; justify-content:space-between; font-size:13px; padding:8px 12px; border-radius:6px; margin-bottom:4px; align-items:center; flex-wrap:wrap; gap:12px;';
+                
+                const labelPrefix = detailItem.status === '締結' ? `🧾 單號: ` : `💬 備註: `;
+                let rightSideHtml = '';
+                if (detailItem.amount > 0) {
+                  rightSideHtml = `<span style="color:${detailItem.status === '締結' ? '#43a047' : '#ef5350'}; font-weight:bold;">${detailItem.status || '未處理'}</span><span style="color:#333; font-weight:bold; min-width:60px; text-align:right;">$${detailItem.amount.toLocaleString()}</span>`;
+                } else {
+                  rightSideHtml = `<span style="font-weight:bold; color:${detailItem.status === '締結' ? '#43a047' : '#ef5350'};">${detailItem.status || '未處理'}</span>`;
+                }
+                
+                targetCard.innerHTML = `
+                  <div style="display:flex; flex-direction:column; gap:4px; flex:1; min-width:200px;">
+                    <div style="color:#546e7a; font-weight:bold; word-break:break-all; line-height:1.4; display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
+                      <span style="background:#2e7d32; color:#ffffff; padding:2px 6px; border-radius:4px; font-size:11px; flex-shrink:0;">↩️ 來自未分類歸類</span>
+                      <span style="background:#efebe9; color:#4e342e; padding:2px 6px; border-radius:4px; font-size:11px; flex-shrink:0;">👤 客戶: ${detailItem.customerName || '未登記'}</span>
+                      <span style="font-size:13px; color:#546e7a;">${labelPrefix}${detailItem.mainText || '無'}</span>
+                    </div>
+                    <div>
+                      <button onclick="cancelReassignment('${sourceStaff}', ${detailIndex})" style="margin-top:4px; padding:3px 8px; font-size:11px; border-radius:4px; border:1px solid #ffcdd2; background:#fff2f2; color:#d32f2f; cursor:pointer; outline:none; font-weight:bold; display:inline-flex; align-items:center; gap:2px;">↩️ 取消歸類 (退回未分類)</button>
+                    </div>
+                  </div>
+                  <div style="display:flex; align-items:center; gap:10px; flex-shrink:0;"> ${rightSideHtml} </div>
+                `;
+                targetDetailsContainer.appendChild(targetCard);
+              }
+            }
+          }
+        }
+      }
+      
+      updateStatsTextOnly(globalConversionRes);
+    };
+
+    window.cancelReassignment = function(sourceStaff, detailIndex) {
+      if (!globalConversionRes) return;
+      const sourceStaffIndex = globalConversionRes.staffList.indexOf(sourceStaff);
+      if (sourceStaffIndex !== -1) {
+        const sourceCardBox = document.getElementById(`conversion-card-${sourceStaffIndex}`);
+        if (sourceCardBox) {
+          const selectElements = sourceCardBox.querySelectorAll('select');
+          if (selectElements[detailIndex]) {
+            selectElements[detailIndex].value = '';
+            window.reassignItem(sourceStaff, detailIndex, '', selectElements[detailIndex]);
+            return;
+          }
+        }
+      }
+      window.reassignItem(sourceStaff, detailIndex, '', null);
+    };
+
+    window.returnToUnclassified = function(fromSpecialStaff, originalIndex, btnEl) {
+      if (!globalConversionRes) return;
+      const d = globalConversionRes.data[fromSpecialStaff].details[originalIndex];
+      if (d) {
+        d.assignedTo = ''; 
+        window.reassignItem(fromSpecialStaff, originalIndex, '', btnEl);
+      }
+    };
+
+    function updateStatsTextOnly(res) {
+      const sortedStaffList = [...res.staffList].sort((a, b) => {
+        const isSpecialA = (a.indexOf('未銷') !== -1 || a.indexOf('未指定') !== -1);
+        const isSpecialB = (b.indexOf('未銷') !== -1 || b.indexOf('未指定') !== -1);
+        return isSpecialA - isSpecialB; 
+      });
+
+      sortedStaffList.forEach((staff, index) => {
+        const item = res.data[staff];
+        const extClosedVal = Number(document.getElementById(`ext-closed-${index}`)?.value || 0);
+        const extAmountVal = Number(document.getElementById(`ext-amount-${index}`)?.value || 0);
+
+        const finalClosed = item.closed + extClosedVal;
+        const finalSum = item.sumAmount + extAmountVal;
+        const finalRate = item.total > 0 ? ((finalClosed / item.total) * 100).toFixed(1) : "0.0";
+        const finalAvg = item.total > 0 ? Math.round(finalSum / item.total) : 0;
+
+        const rateEl = document.getElementById(`rate-text-${index}`);
+        const countEl = document.getElementById(`count-text-${index}`);
+        const sumEl = document.getElementById(`sum-text-${index}`);
+        const avgEl = document.getElementById(`avg-text-${index}`);
+        const maxEl = document.getElementById(`max-text-${index}`);
+
+        if (rateEl) rateEl.innerText = `${finalRate}%`;
+        if (countEl) countEl.innerHTML = `${item.total} / <span style="font-size:19px; color:#2e7d32; font-weight:900;">${finalClosed}</span>`;
+        if (sumEl) sumEl.innerText = `$${finalSum.toLocaleString()}`;
+        if (avgEl) avgEl.innerText = `$${finalAvg.toLocaleString()}`;
+        if (maxEl) maxEl.innerText = `$${item.maxAmount.toLocaleString()}`;
+      });
+
+      const masterCard = document.getElementById('conversion-master-summary-card');
+      if (masterCard) {
+        const tbody = masterCard.querySelector('tbody');
+        if (tbody) {
+          let newRowsHtml = '';
+          sortedStaffList.forEach((staff, index) => {
+            const item = res.data[staff];
+            const isSpecial = (staff.indexOf('未銷') !== -1 || staff.indexOf('未指定') !== -1);
+            const rowBgColor = isSpecial ? '#f1f3f4' : '#ffffff';
+
+            const extClosedVal = Number(document.getElementById(`ext-closed-${index}`)?.value || 0);
+            const extAmountVal = Number(document.getElementById(`ext-amount-${index}`)?.value || 0);
+
+            const finalClosed = item.closed + extClosedVal;
+            const finalSum = item.sumAmount + extAmountVal;
+            const finalRate = item.total > 0 ? ((finalClosed / item.total) * 100).toFixed(1) : "0.0";
+            const finalAvg = item.total > 0 ? Math.round(finalSum / item.total) : 0;
+
+            newRowsHtml += `
+              <tr style="border-bottom: 1px solid #eef1f2; font-size: 13px; color: #546e7a; background: ${rowBgColor};">
+                <td style="padding: 12px 10px; font-weight: bold; color: ${isSpecial ? '#78909c' : '#37474f'};">👤 ${staff}</td>
+                <td style="padding: 12px 10px; text-align: center; font-weight: bold; color: #2e7d32;">${item.total} / ${finalClosed}</td>
+                <td style="padding: 12px 10px; text-align: center; color: #1976d2; font-weight: bold;">${finalRate}%</td>
+                <td style="padding: 12px 10px; text-align: right; font-weight: bold; color: #333;">$${finalSum.toLocaleString()}</td>
+                <td style="padding: 12px 10px; text-align: right; color: #546e7a;">$${finalAvg.toLocaleString()}</td>
+                <td style="padding: 12px 10px; text-align: right; color: #ef6c00; font-weight: bold;">$${item.maxAmount.toLocaleString()}</td>
+              </tr>
+            `;
+          });
+          tbody.innerHTML = newRowsHtml;
+        }
+      }
+    }
+
+    function recalcStaffStats(staffName) {
+      const group = globalConversionRes.data[staffName];
+      if (!group) return;
+      const isSpecial = (staffName.indexOf('未銷') !== -1 || staffName.indexOf('未指定') !== -1);
+      
+      group.total = 0; group.closed = 0; group.sumAmount = 0; group.maxAmount = 0;
+      
+      if (isSpecial) {
+        group.details.forEach(d => {
+          if (!d.assignedTo) {
+            group.total++;
+            if (d.status === '締結') group.closed++;
+            group.sumAmount += Number(d.amount || 0);
+            if (Number(d.amount || 0) > group.maxAmount) group.maxAmount = Number(d.amount || 0);
+          }
+        });
+      } else {
+        const effectiveDetails = group.details.filter(d => !d.fromSpecialStaff || d.assignedTo === staffName);
+        effectiveDetails.forEach(d => {
+          group.total++;
+          if (d.status === '締結') group.closed++;
+          group.sumAmount += Number(d.amount || 0);
+          if (Number(d.amount || 0) > group.maxAmount) group.maxAmount = Number(d.amount || 0);
+        });
+      }
+      
+      group.rate = group.total > 0 ? ((group.closed / group.total) * 100).toFixed(1) : "0.0";
+      group.avgAmount = group.total > 0 ? Math.round(group.sumAmount / group.total) : 0;
+    }
+
+    function renderConversionStats(res) {
+      const currentScrollTop = window.scrollY || document.documentElement.scrollTop;
+
+      const openExternalStaffs = [];
+      const openInternalStaffs = [];
+      document.querySelectorAll('.mini-chart-box[data-staff]').forEach(box => {
+        const sName = box.getAttribute('data-staff');
+        const deElements = box.querySelectorAll('details');
+        if (deElements[0] && deElements[0].open) openExternalStaffs.push(sName);
+        if (deElements.length > 1) {
+          if (deElements[1] && deElements[1].open) openInternalStaffs.push(sName);
+        } else if (deElements[0] && deElements[0].open) {
+          openInternalStaffs.push(sName);
+        }
+      });
+
+      hideMask();
+      const container = document.getElementById('conversion-content');
+      if(!res.staffList || res.staffList.length === 0) { container.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:20px; color:#999;">此區間內無相符的紀錄資料</div>'; return; }
+
+      const sDate = document.getElementById('conversion-date-start').value.replace(/-/g, '/');
+      const eDate = document.getElementById('conversion-date-end').value.replace(/-/g, '/');
+
+      const sortedStaffList = [...res.staffList].sort((a, b) => {
+        const isSpecialA = (a.indexOf('未銷') !== -1 || a.indexOf('未指定') !== -1);
+        const isSpecialB = (b.indexOf('未銷') !== -1 || b.indexOf('未指定') !== -1);
+        return isSpecialA - isSpecialB; 
+      });
+
+      const normalStaffOptions = sortedStaffList.filter(s => s.indexOf('未銷') === -1 && s.indexOf('未指定') === -1);
+
+      let tableRowsHtml = '';
+      sortedStaffList.forEach((staff) => {
+        const item = res.data[staff];
+        const isSpecial = (staff.indexOf('未銷') !== -1 || staff.indexOf('未指定') !== -1);
+        const rowBgColor = isSpecial ? '#f1f3f4' : '#ffffff';
+        
+        tableRowsHtml += `
+          <tr style="border-bottom: 1px solid #eef1f2; font-size: 13px; color: #546e7a; background: ${rowBgColor};">
+            <td style="padding: 12px 10px; font-weight: bold; color: ${isSpecial ? '#78909c' : '#37474f'};">👤 ${staff}</td>
+            <td style="padding: 12px 10px; text-align: center; font-weight: bold; color: #2e7d32;">${item.total} / ${item.closed}</td>
+            <td style="padding: 12px 10px; text-align: center; color: #1976d2; font-weight: bold;">${item.rate}%</td>
+            <td style="padding: 12px 10px; text-align: right; font-weight: bold; color: #333;">$${item.sumAmount.toLocaleString()}</td>
+            <td style="padding: 12px 10px; text-align: right; color: #546e7a;">$${item.avgAmount.toLocaleString()}</td>
+            <td style="padding: 12px 10px; text-align: right; color: #ef6c00; font-weight: bold;">$${item.maxAmount.toLocaleString()}</td>
+          </tr>
+        `;
+      });
+
+      let html = `
+        <div class="mini-chart-box" id="conversion-master-summary-card" style="grid-column: 1 / -1; height: auto; display: block; padding: 24px; background: #ffffff; border: 1px solid #cfd8dc; box-shadow: 0 4px 12px rgba(0,0,0,0.05); border-radius: 12px; margin-bottom: 20px;">
+          <div class="box-header" style="border-bottom: 2px solid #b0bec5; padding-bottom: 14px; margin-bottom: 16px; align-items: center; justify-content: space-between; display: flex;">
+            <div class="box-title" style="font-size: 16px; color: #263238; display: flex; align-items: center; background: none; padding: 0; margin: 0;">
+              <span style="background: #eceff1; padding: 6px 14px; border-radius: 8px; font-weight: bold; color: #37474f;">📋 團隊締結成效業績總表</span>
+            </div>
+            <button onclick="shareMasterSummaryCard()" style="background: #00c300; color: white; border: none; padding: 7px 16px; border-radius: 20px; font-size: 13px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 6px rgba(0,195,0,0.3); display: inline-flex; align-items: center; gap: 4px; outline: none;">📸 匯出主管總表</button>
+          </div>
+          <div style="display: flex; gap: 15px; margin-bottom: 16px; font-size: 13px; color: #607d8b; flex-wrap: wrap; background: #f8f9fa; padding: 10px 14px; border-radius: 8px; border: 1px solid #edf0f2;">
+            <div>📅 <b>統計期間：</b>${sDate} ~ ${eDate}</div>
+            <div>🔄 <b>更新日期：</b>${res.updateDate || '無'}</div>
+          </div>
+          <div style="overflow-x: auto; width: 100%; margin-bottom: 10px;">
+            <table style="width: 100%; border-collapse: collapse; text-align: left; min-width: 580px;">
+              <thead>
+                <tr style="background: #f4f6f7; border-bottom: 2px solid #cfd8dc; font-size: 13px; color: #455a64;">
+                  <th style="padding: 10px; font-weight: bold;">服務人</th>
+                  <th style="padding: 10px; text-align: center; font-weight: bold;">總件 / 締結</th>
+                  <th style="padding: 10px; text-align: center; font-weight: bold;">締結率</th>
+                  <th style="padding: 10px; text-align: right; font-weight: bold;">總金額</th>
+                  <th style="padding: 10px; text-align: right; font-weight: bold;">平均金額</th>
+                  <th style="padding: 10px; text-align: right; font-weight: bold;">最高金額</th>
+                </tr>
+              </thead>
+              <tbody> ${tableRowsHtml} </tbody>
+            </table>
+          </div>
+          <div style="font-size: 12px; color: #90a4ae; text-align: center; font-weight: bold; margin-top: 15px; padding-top: 12px; border-top: 1px dashed #e0e0e0; letter-spacing: 0.5px; user-select: none;">
+            [紀錄皆為完銷後，或手動登記後列入統計]
+          </div>
+        </div>
+      `;
+
+      sortedStaffList.forEach((staff, index) => {
+        const item = res.data[staff];
+        const cardId = `conversion-card-${index}`;
+        const isSpecial = (staff.indexOf('未銷') !== -1 || staff.indexOf('未指定') !== -1);
+        const cardBgStyle = isSpecial ? 'background: #f5f7f8; border: 1px solid #dcdfe1; box-shadow: none;' : 'background: #ffffff; border: 1px solid #eee;';
+        
+        const isExtOpen = openExternalStaffs.includes(staff) ? 'open' : '';
+        const isInternalOpen = openInternalStaffs.includes(staff) ? 'open' : '';
+
+        const detailsHtml = item.details.map((d, dIdx) => {
+          const labelPrefix = d.status === '締結' ? `🧾 單號: ` : `💬 備註: `;
+          const rowBg = dIdx % 2 === 0 ? '#ffffff' : (isSpecial ? '#ebeded' : '#f7f9f8');
+          
+          let rightSideHtml = '';
+          if (d.amount > 0) {
+            rightSideHtml = `
+              <span style="color:${d.status === '締結' ? '#43a047' : '#ef5350'}; font-weight:bold;">${d.status || '未處理'}</span>
+              <span style="color:#333; font-weight:bold; min-width:60px; text-align:right;">$${d.amount.toLocaleString()}</span>
+            `;
+          } else {
+            const statusText = String(d.status || '').trim();
+            const displayText = statusText !== '' ? statusText : '未處理';
+            let labelStyle = 'font-weight:bold;';
+            if (displayText === '未處理') {
+              labelStyle += 'color:#78909c; background:#eceff1; padding:2px 8px; border-radius:4px; font-size:12px;';
+            } else if (displayText === '締結') {
+              labelStyle += 'color:#43a047;';
+            } else { labelStyle += 'color:#ef5350;'; }
+            rightSideHtml = `<span style="${labelStyle}">${displayText}</span>`;
+          }
+          
+          let assignSelectHtml = '';
+          if (isSpecial && normalStaffOptions.length > 0) {
+            assignSelectHtml = `
+              <select onchange="reassignItem('${staff}', ${dIdx}, this.value, this)" style="margin-top:4px; padding:3px 6px; font-size:12px; border-radius:4px; border:1px solid #cfd8dc; background:#fff; color:#455a64; outline:none; cursor:pointer;">
+                <option value="">🔄 歸類此單給...</option>
+                ${normalStaffOptions.map(opt => `<option value="${opt}" ${d.assignedTo === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+              </select>
+            `;
+          } else if (!isSpecial && d.fromSpecialStaff) {
+            assignSelectHtml = `
+              <button onclick="returnToUnclassified('${d.fromSpecialStaff}', ${d.originalIndex}, this)" style="margin-top:4px; padding:3px 8px; font-size:11px; border-radius:4px; border:1px solid #ffcdd2; background:#fff2f2; color:#d32f2f; cursor:pointer; outline:none; font-weight:bold; display:inline-flex; align-items:center; gap:2px; transition:0.2s;">↩️ 退回未分類</button>
+            `;
+          }
+          
+          return `
+            <div class="conversion-detail-row" style="display:flex; justify-content:space-between; font-size:13px; padding:8px 12px; background:${rowBg}; border-radius:6px; margin-bottom:4px; align-items:center; flex-wrap:wrap; gap:12px;">
+              <div style="display:flex; flex-direction:column; gap:4px; flex:1; min-width:200px;">
+                <div style="color:#546e7a; font-weight:bold; word-break:break-all; line-height:1.4; display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
+                  <span style="background:#efebe9; color:#4e342e; padding:2px 6px; border-radius:4px; font-size:11px; flex-shrink:0; user-select:none;">👤 客戶: ${d.customerName || '未登記'}</span>
+                  <span style="font-size:13px; color:#546e7a;">${labelPrefix}${d.mainText || '無'}</span>
+                </div>
+                ${assignSelectHtml}
+              </div>
+              <div style="display:flex; align-items:center; gap:10px; flex-shrink:0;"> ${rightSideHtml} </div>
+            </div>
+          `;
+        }).join('');
+
+        html += `
+          <div class="mini-chart-box" id="${cardId}" data-staff="${staff}" style="grid-column: 1 / -1; height: auto; display:block; padding: 22px; ${cardBgStyle}">
+            <div class="box-header" style="border-bottom: 1px solid #f0f0f0; padding-bottom: 14px; margin-bottom:14px; align-items: center; flex-wrap: wrap; gap: 10px;">
+              <div class="box-title" style="font-size:15px; color:var(--primary-color); display:flex; align-items:center; flex-wrap:wrap; gap:5px; background:none; padding:0; margin:0;">
+                <span style="background:${isSpecial ? '#e4e8ea' : '#f4f7f6'}; padding:6px 12px; border-radius:8px; font-weight:bold; color: ${isSpecial ? '#546e7a' : 'inherit'};">👤 服務人：${staff}</span>
+                <span style="font-size:12px; color:#78909c; font-weight:normal; margin-left:8px; background:#f0f4f2; padding:2px 8px; border-radius:6px;">📅 ${sDate} ~ ${eDate}</span>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <div class="box-total" style="background:#e3f2fd; color:#1976d2; font-size:14px; padding:5px 12px; border-radius:8px; margin:0;">
+                  綜合締結率：<b id="rate-text-${index}" style="font-size:16px;">${item.rate}%</b>
+                </div>
+                <span style="font-size:12px; color:#b76e00; background:#fff8e1; border:1px solid #ffe082; padding:5px 10px; border-radius:15px; font-weight:bold; white-space:nowrap; display:inline-flex; align-items:center; gap:3px;">
+                  🔄 更新日: ${res.updateDate || '無'}
+                </span>
+                <button onclick="shareConversionCard('${cardId}', '${staff}')" style="background:#00c300; color:white; border:none; padding:5px 12px; border-radius:15px; font-size:13px; font-weight:bold; cursor:pointer; box-shadow: 0 2px 5px rgba(0,195,0,0.2);">📸 分享</button>
+              </div>
+            </div>
+            
+            <details ${isExtOpen} style="border: 1px dashed #a5d6a7; border-radius:12px; background:#f4f9f5; padding:8px 14px; margin-bottom:15px; outline:none;">
+              <summary style="font-size:13px; color:#2e7d32; font-weight:bold; cursor:pointer; outline:none; user-select:none;">🛠️ 展開/收起：手動混入外部未登記數據擴充欄位</summary>
+              <div style="display:flex; gap:15px; margin-top:12px; flex-wrap:wrap; align-items:center;">
+                <div style="flex:1; min-width:240px; display:flex; align-items:center; gap:10px;">
+                  <label style="font-size:13px; color:#2e7d32; font-weight:bold; white-space:nowrap; margin:0;">➕ 加入未登記締結件數</label>
+                  <div style="position:relative; flex:1; display:flex; align-items:center;">
+                    <input type="text" inputmode="numeric" id="ext-closed-${index}" class="date-input" style="width:100%; height:36px; background:#ffffff; border-color:#c8e6c9; padding:0 28px 0 10px; margin:0; font-size:14px;" placeholder="0" oninput="this.value=this.value.replace(/[^0-9]/g,''); recalcConversion(${index}, ${item.total}, ${item.closed}, ${item.sumAmount}, ${item.maxAmount})">
+                    <button onclick="document.getElementById('ext-closed-${index}').value=''; recalcConversion(${index}, ${item.total}, ${item.closed}, ${item.sumAmount}, ${item.maxAmount});" style="position:absolute; right:6px; background:none; border:none; color:#ff8a80; cursor:pointer; font-size:14px; font-weight:bold; padding:2px 4px; outline:none;">✕</button>
+                  </div>
+                </div>
+                <div style="flex:1; min-width:240px; display:flex; align-items:center; gap:10px;">
+                  <label style="font-size:13px; color:#2e7d32; font-weight:bold; white-space:nowrap; margin:0;">加總外部總金額</label>
+                  <div style="position:relative; flex:1; display:flex; align-items:center;">
+                    <input type="text" inputmode="decimal" id="ext-amount-${index}" class="date-input" style="width:100%; height:36px; background:#ffffff; border-color:#c8e6c9; padding:0 28px 0 10px; margin:0; font-size:14px;" placeholder="0" oninput="this.value=this.value.replace(/[^0-9.]/g,''); recalcConversion(${index}, ${item.total}, ${item.closed}, ${item.sumAmount}, ${item.maxAmount})">
+                    <button onclick="document.getElementById('ext-amount-${index}').value=''; recalcConversion(${index}, ${item.total}, ${item.closed}, ${item.sumAmount}, ${item.maxAmount});" style="position:absolute; right:6px; background:none; border:none; color:#ff8a80; cursor:pointer; font-size:14px; font-weight:bold; padding:2px 4px; outline:none;">✕</button>
+                  </div>
+                </div>
+              </div>
+            </details>
+            
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap:12px; margin-bottom: 15px;">
+              <div style="background:${isSpecial ? '#e2ebd5' : '#e8f5e9'}; border: 1px solid ${isSpecial ? '#c0d6a4' : '#c8e6c9'}; padding:10px; border-radius:10px; text-align:center;">
+                <div style="font-size:12px; color:#2e7d32; font-weight:bold; margin-bottom:4px;">總件 / 締結</div>
+                <div id="count-text-${index}" style="font-size:16px; font-weight:bold; color:#1b5e20;">${item.total} / <span style="font-size:19px; color:#2e7d32; font-weight:900;">${item.closed}</span></div>
+              </div>
+              <div style="background:#ffffff; border: 1px solid #e0e0e0; padding:10px; border-radius:10px; text-align:center;">
+                <div style="font-size:12px; color:#78909c; margin-bottom:4px;">總金額</div>
+                <div id="sum-text-${index}" style="font-size:16px; font-weight:bold; color:#333;">$${item.sumAmount.toLocaleString()}</div>
+              </div>
+              <div style="background:#ffffff; border: 1px solid #e0e0e0; padding:10px; border-radius:10px; text-align:center;">
+                <div style="font-size:12px; color:#78909c; margin-bottom:4px;">平均金額</div>
+                <div id="avg-text-${index}" style="font-size:16px; font-weight:bold; color:#1976d2;">$${item.avgAmount.toLocaleString()}</div>
+              </div>
+              <div style="background:#ffffff; border: 1px solid #e0e0e0; padding:10px; border-radius:10px; text-align:center;">
+                <div style="font-size:12px; color:#78909c; margin-bottom:4px;">最高金額</div>
+                <div id="max-text-${index}" style="font-size:16px; font-weight:bold; color:#ef6c00;">$${item.maxAmount.toLocaleString()}</div>
+                <div style="font-size:11px; color:#90a4ae; margin-top:4px; font-weight:bold;">[僅顯示有登記紀錄]</div>
+              </div>
+            </div>
+            
+            <details ${isInternalOpen} style="border: 1px solid #eee; border-radius:10px; padding:6px 12px; background:#fff;">
+              <summary style="font-size:13px; color:#546e7d; font-weight:bold; cursor:pointer; outline:none; user-select:none;">📋 展開查看內部系統明細 (${item.total} 筆)</summary>
+              <div style="margin-top:10px; max-height:260px; overflow-y:auto; padding:5px; background:#ffffff; border-radius:8px;">
+                ${detailsHtml}
+              </div>
+            </details>
+          </div>
+        `;
+      });
+      
+      container.innerHTML = html;
+      
+      setTimeout(() => {
+        window.scrollTo({
+          top: currentScrollTop,
+          behavior: 'instant'
+        });
+      }, 80);
+    }
+
+    function shareMasterSummaryCard() {
+      const cardElement = document.getElementById('conversion-master-summary-card');
+      const btn = cardElement.querySelector('button');
+      if(btn) btn.style.display = 'none';
+      showMask('📸 正在製作主管總表報告...');
+      setTimeout(() => {
+        html2canvas(cardElement, { scale: 2, backgroundColor: '#ffffff', useCORS: true, scrollY: 0, scrollX: 0 }).then(canvas => {
+          if(btn) btn.style.display = 'inline-block'; 
+          hideMask();
+          canvas.toBlob(blob => {
+            const dateStr = new Date().toISOString().slice(0,10);
+            const fileName = `團隊締結成效主管總表_${dateStr}.jpg`;
+            const file = new File([blob], fileName, { type: 'image/jpeg' });
+            if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+              navigator.share({ files: [file], title: `團隊締結成效主管總表` }).catch(err => console.log('分享已取消', err));
+            } else {
+              const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = fileName; link.click();
+            }
+          }, 'image/jpeg', 0.92);
+        }).catch(err => { console.error(err); if(btn) btn.style.display = 'inline-block'; hideMask(); alert('製作總表失敗'); });
+      }, 200);
+    }
+
+    function shareConversionCard(elementId, name) {
+      const cardElement = document.getElementById(elementId);
+      const btn = cardElement.querySelector('button');
+      const allDetails = cardElement.querySelectorAll('details');
+      const extDetailsEl = allDetails[0]; 
+      const internalDetailsEl = allDetails.length > 1 ? allDetails[1] : allDetails[0];
+      const extContentDiv = extDetailsEl ? extDetailsEl.querySelector('div') : null;
+      const scrollEl = internalDetailsEl ? internalDetailsEl.querySelector('details > div') : null;
+      
+      if(btn) btn.style.display = 'none';
+      let isExtClosed = extDetailsEl ? !extDetailsEl.open : false;
+      let isInternalClosed = internalDetailsEl ? !internalDetailsEl.open : false;
+      
+      if (internalDetailsEl && isInternalClosed) internalDetailsEl.open = true; 
+      if (scrollEl) { scrollEl.style.maxHeight = 'none'; scrollEl.style.overflowY = 'visible'; }
+      if (extContentDiv && isExtClosed) { extContentDiv.style.setProperty('display', 'none', 'important'); }
+
+      showMask('📸 製作完整成效卡片中...');
+      setTimeout(() => {
+        html2canvas(cardElement, { scale: 2, backgroundColor: '#ffffff', useCORS: true, scrollY: 0, scrollX: 0 }).then(canvas => {
+          if(btn) btn.style.display = 'inline-block';
+          if (internalDetailsEl && isInternalClosed) internalDetailsEl.open = false;
+          if (scrollEl) { scrollEl.style.maxHeight = '260px'; scrollEl.style.overflowY = 'auto'; }
+          if (extContentDiv && isExtClosed) { extContentDiv.style.removeProperty('display'); }
+          hideMask();
+          canvas.toBlob(blob => {
+            const dateStr = new Date().toISOString().slice(0,10);
+            const fileName = `${name}_締結率成效_${dateStr}.png`;
+            const file = new File([blob], fileName, { type: 'image/png' });
+            if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+              navigator.share({ files: [file], title: `${name} 締結成效數據` }).catch(err => console.log('分享已取消', err));
+            } else {
+              const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = fileName; link.click();
+            }
+          }, 'image/png');
+        }).catch(err => { console.error(err); if(btn) btn.style.display = 'inline-block'; if (internalDetailsEl && isInternalClosed) internalDetailsEl.open = false; if (scrollEl) { scrollEl.style.maxHeight = '260px'; scrollEl.style.overflowY = 'auto'; } if (extContentDiv && isExtClosed) { extContentDiv.style.removeProperty('display'); } hideMask(); alert('製作卡片失敗'); });
+      }, 200);
+    }
+
+    
+    function openDoctor() { window.open("https://script.google.com/macros/s/AKfycbwptFdFQBWhJyMwdPfY8XJoTrFnBaqJuqUnbFCB0DexULL1egaZqMUeBfYCjp-cyp1j/exec", '_blank'); }
+  </script>
+</body>
+
+</html>
