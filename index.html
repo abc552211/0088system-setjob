@@ -1084,7 +1084,10 @@
         </div>
         <div class="mini-chart-box" style="grid-column: 1 / -1;">
           <div class="box-header">
-            <div class="box-title">⚠️ 未回診天數警示</div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <div class="box-title">⚠️ 未回診天數警示</div>
+              <label class="switch" style="transform: scale(0.7);"><input type="checkbox" id="toggle-days-active" onchange="updateDaysChart()" checked><span class="slider"></span></label>
+            </div>
             <div class="box-total" id="total-days">總計: 0人</div>
           </div>
           <div style="height:240px;"><canvas id="chartDays"></canvas></div>
@@ -1879,7 +1882,10 @@
             Defocus: { active: 0, stop: 0 },
             Soft: { active: 0, stop: 0 }
           },
-          days: { safe: 0, warn: 0, danger: 0 },
+          days: {
+            active: { safe: 0, warn: 0, danger: 0 },
+            all: { safe: 0, warn: 0, danger: 0 }
+          },
           age: {}
         };
 
@@ -1887,7 +1893,6 @@
         for (let i = 0; i <= 100; i++) stats.age[i] = initAgeObj();
         stats.age["Other"] = initAgeObj();
 
-        // 關鍵字比對清單 (自動轉大寫以防大小寫不一致)
         const okKeywords = ['塑型', 'OK', '一代', '二代', '三代', '標準', '優克', 'DF1', 'BF'];
         const defocusKeywords = ['HOYA', '星趣', '離焦大片', '離焦'];
         const softKeywords = ['酷柏', '軟控', 'MISIGHT', '軟'];
@@ -1897,8 +1902,6 @@
           const prodUpper = prodRaw.toUpperCase();
 
           let pType = null;
-
-          // 1. 依指定關鍵字精確配對
           if (okKeywords.some(k => prodUpper.includes(k.toUpperCase()))) {
             pType = 'OK';
           } else if (defocusKeywords.some(k => prodUpper.includes(k.toUpperCase()))) {
@@ -1906,14 +1909,14 @@
           } else if (softKeywords.some(k => prodUpper.includes(k.toUpperCase()))) {
             pType = 'Soft';
           } else {
-            // 若皆未匹配，預設歸入 OK
             pType = 'OK';
           }
 
-          // 2. 判斷使用中 / 停止更新狀態
+          // 1. 判斷使用中 / 停用
           const isExplicitStop = (r.is_active === false || String(r.status || '').includes('停') || String(r.result || '').includes('停'));
-          const daysVal = parseInt(r.days_not_back, 10);
-          const isOverYearNotBack = !isNaN(daysVal) && daysVal > 365;
+          const rawDays = r.days_not_back !== null && r.days_not_back !== undefined ? String(r.days_not_back).replace(/[^0-9]/g, '') : '';
+          const daysVal = rawDays !== '' ? parseInt(rawDays, 10) : 0; // 若無填寫預設為 0 天
+          const isOverYearNotBack = daysVal > 365;
           const isActive = !(isExplicitStop || isOverYearNotBack);
 
           stats.total[pType]++;
@@ -1923,19 +1926,24 @@
             stats.status[pType].stop++;
           }
 
-          // 3. 未回診天數分段警示
-          if (!isNaN(daysVal)) {
-            if (daysVal <= 90) stats.days.safe++;
-            else if (daysVal <= 120) stats.days.warn++;
-            else stats.days.danger++;
+          // 2. 未回診天數分類 (強制歸入三類之一，絕不遺漏)
+          let category = 'safe';
+          if (daysVal <= 90) {
+            category = 'safe';
+          } else if (daysVal <= 120) {
+            category = 'warn';
           } else {
-            stats.days.safe++;
+            category = 'danger';
           }
 
-          // 4. 年齡精確換算
+          stats.days.all[category] = (stats.days.all[category] || 0) + 1;
+          if (isActive) {
+            stats.days.active[category] = (stats.days.active[category] || 0) + 1;
+          }
+
+          // 3. 年齡計算
           let age = "Other";
           const birthStr = String(r.birthday || '').trim();
-          
           if (birthStr) {
             let birthYear = NaN;
             if (birthStr.includes('/') || birthStr.includes('-')) {
@@ -1968,6 +1976,56 @@
         hideMask();
         alert("兒控大檔統計失敗: " + e.message);
       }
+    }
+
+    function updateDaysChart() {
+      if (!currentMyopiaData || !currentMyopiaData.days) return;
+      const ctx = document.getElementById('chartDays');
+      const toggleEl = document.getElementById('toggle-days-active');
+      const onlyActive = toggleEl ? toggleEl.checked : true;
+      
+      const source = onlyActive ? (currentMyopiaData.days.active || {safe:0, warn:0, danger:0}) : (currentMyopiaData.days.all || {safe:0, warn:0, danger:0});
+      
+      const valSafe = Number(source.safe) || 0;
+      const valWarn = Number(source.warn) || 0;
+      const valDanger = Number(source.danger) || 0;
+      const total = valSafe + valWarn + valDanger;
+
+      if (myopiaCharts['chartDays']) myopiaCharts['chartDays'].destroy();
+      document.getElementById('total-days').innerText = onlyActive ? `使用中: ${total}人` : `總計: ${total}人`;
+
+      myopiaCharts['chartDays'] = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: ['90天內 (安全)', '91-120天 (注意)', '121天以上 (警示)'],
+          datasets: [{
+            label: '人數',
+            data: [valSafe, valWarn, valDanger],
+            backgroundColor: [COLORS.Safe, COLORS.Warn, COLORS.Danger]
+          }]
+        },
+        options: {
+          ...commonChartOptions,
+          indexAxis: 'y',
+          plugins: {
+            legend: { display: false },
+            datalabels: {
+              ...commonChartOptions.plugins.datalabels,
+              color: '#fff',
+              formatter: (value) => value > 0 ? `${value}人` : ''
+            }
+          },
+          scales: {
+            x: {
+              beginAtZero: true,
+              grace: '10%',
+              ticks: {
+                callback: v => (v % 1 === 0 ? v + " 人" : '')
+              }
+            }
+          }
+        }
+      });
     }
 
     function renderMyopiaCharts(data) {
@@ -2046,19 +2104,7 @@
       });
     }
 
-    function updateDaysChart() {
-      if (!currentMyopiaData) return;
-      const ctx = document.getElementById('chartDays'), source = currentMyopiaData.days;
-      if (myopiaCharts['chartDays']) myopiaCharts['chartDays'].destroy();
-      const total = source.safe + source.warn + source.danger;
-      document.getElementById('total-days').innerText = `總計: ${total}人`;
-
-      myopiaCharts['chartDays'] = new Chart(ctx, {
-        type: 'bar',
-        data: { labels: ['90天內 (安全)', '91-120天 (注意)', '121天以上 (警示)'], datasets: [{ label: '人數', data: [source.safe, source.warn, source.danger], backgroundColor: [COLORS.Safe, COLORS.Warn, COLORS.Danger] }] },
-        options: { ...commonChartOptions, indexAxis: 'y', plugins: { legend: { display: false }, datalabels: { ...commonChartOptions.plugins.datalabels, color: '#fff' } }, scales: { x: { ticks: { callback: v => (v % 1 === 0 ? v + " 人" : '') } } } }
-      });
-    }
+    
 
     let lossCharts = {};
 
