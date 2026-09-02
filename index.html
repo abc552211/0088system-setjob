@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>工作任務維護與數據分析系統</title>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
@@ -1138,16 +1138,8 @@
   </main>
 
   <script>
-    const SUPABASE_URL = "https://niytitszugkfsfdwlwqt.supabase.co";
-    const SUPABASE_KEY = "sb_publishable_dsxxWLXxfbTHmXOfmEUUfA_Y8h1tykR";
-    const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-
-    // 🔗 直連【客戶追蹤總表專案】(讀取 1117+ 全量客戶資料表 customers)
-    const CLIENTS_SUPABASE_URL = "https://wycoyydhcaeuabaelwdo.supabase.co";
-    const CLIENTS_SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind5Y295eWRoY2FldWFiYWVsd2RvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc5MDk2MDUsImV4cCI6MjEwMzQ4NTYwNX0.fkTge9-CHTIIYhQOfMpEmkRM9vOleM6rGd-h4sYDzjw";
-    const _clientsDb = (typeof supabase !== 'undefined' && supabase.createClient)
-      ? supabase.createClient(CLIENTS_SUPABASE_URL, CLIENTS_SUPABASE_KEY)
-      : _supabase;
+    // ★ 安全防護：兩組 Supabase 金鑰與密碼表已由 Cloudflare Worker 接管，前端零曝光
+    const API_BASE_URL = "https://0088setjobs-security.abc552211.workers.dev";
 
     
 
@@ -1171,14 +1163,9 @@
         document.getElementById('login-screen').style.display = 'none';
 
         // 背景靜態讀取權限，絕不因網路報錯中斷登入狀態
-        _supabase.from('system_settings').select('value').eq('key', 'line_uid_map').single()
-          .then(({ data }) => {
-            if (data && data.value && data.value[currentUser]) {
-              applyPermissions(data.value[currentUser].permissions || "ABCDEFGHIJ");
-            } else {
-              applyPermissions("ABCDEFGHIJ");
-            }
-          })
+        fetch(`${API_BASE_URL}/api/auth/permissions/${encodeURIComponent(currentUser)}`)
+          .then(res => res.json())
+          .then(data => applyPermissions(data.permissions || "ABCDEFGHIJ"))
           .catch(() => applyPermissions("ABCDEFGHIJ"));
 
         try {
@@ -1204,41 +1191,27 @@
       btn.innerText = '核對中...'; btn.classList.add('working'); showMask('個人安全憑證核對中...');
       
       try {
-        const { data, error } = await _supabase
-          .from('system_settings')
-          .select('value')
-          .eq('key', 'line_uid_map')
-          .single();
+        const res = await fetch(`${API_BASE_URL}/api/auth/verify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: inputPwd })
+        });
+        const result = await res.json();
 
-        if (error || !data || !data.value) throw new Error("認證模組連線異常");
-
-        const uidMap = data.value;
-        let authenticatedUser = null;
-        let userPermissions = "ABCDEFGHIJ";
-
-        for (const staffName in uidMap) {
-          if (uidMap[staffName] && uidMap[staffName].password === inputPwd) {
-            authenticatedUser = staffName;
-            userPermissions = uidMap[staffName].permissions || "ABCDEFGHIJ";
-            break;
-          }
-        }
-
-        if (authenticatedUser) {
-          currentUser = authenticatedUser;
-          // 同時記錄專屬與通用 Token，永久綁定此裝置
+        if (result && result.success) {
+          currentUser = result.staffName;
           localStorage.setItem(AUTH_TOKEN_KEY, "true");
-          localStorage.setItem(AUTH_USER_KEY, authenticatedUser);
+          localStorage.setItem(AUTH_USER_KEY, currentUser);
           localStorage.setItem("device_authorized_token", "true");
-          localStorage.setItem("current_staff_name", authenticatedUser);
+          localStorage.setItem("current_staff_name", currentUser);
 
-          document.getElementById('user-display').innerText = '👤 ' + authenticatedUser;
+          document.getElementById('user-display').innerText = '👤 ' + currentUser;
           document.getElementById('sidebar').style.display = 'flex';
           document.getElementById('main-content').style.display = 'flex';
           document.getElementById('login-screen').style.opacity = '0'; 
           setTimeout(() => { document.getElementById('login-screen').style.display = 'none'; }, 500);
           
-          applyPermissions(userPermissions); 
+          applyPermissions(result.permissions || "ABCDEFGHIJ"); 
           await refreshData(); 
           checkSupabaseUsageQuota();
           goHome();
@@ -1247,7 +1220,7 @@
           hideMask(); 
           btn.innerText = '確認授權此裝置'; 
           btn.classList.remove('working'); 
-          document.getElementById('login-error').innerText = "密碼錯誤！找不到對應的授權人員"; 
+          document.getElementById('login-error').innerText = result.error || "密碼錯誤！找不到對應的授權人員"; 
         }
       } catch (e) {
         hideMask(); 
@@ -1282,13 +1255,12 @@
     async function refreshData() { 
       showMask('載入中...'); 
       try {
-        const { data: staffData } = await _supabase.from('system_settings').select('value').eq('key', 'staff_list').single();
-        const { data: taskData } = await _supabase.from('task_configs').select('*').order('item_order', { ascending: true });
+        const res = await fetch(`${API_BASE_URL}/api/tasks/init`);
+        const data = await res.json();
 
-        // 過濾選單人員：排除「全員」以避免下拉重複
-        const rawStaffList = (staffData && staffData.value) ? staffData.value : [];
+        const rawStaffList = data.staffList || [];
         const execOptions = rawStaffList.filter(s => s && s !== '全員');
-        const tasks = taskData || [];
+        const tasks = data.tasks || [];
 
         allData = {
           weekly: tasks.filter(t => t.category === 'weekly').map(t => ({
@@ -1537,18 +1509,16 @@
       }
 
       try {
-        await _supabase.from('task_configs').delete().eq('category', currentMode);
-        
-        if (insertRows.length > 0) {
-          const { error } = await _supabase.from('task_configs').insert(insertRows);
-          if (error) throw error;
-        }
+        const res = await fetch(`${API_BASE_URL}/api/tasks/save`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ category: currentMode, items: insertRows })
+        });
+        if (!res.ok) throw new Error("儲存失敗");
 
-        hasUnsavedChanges = false; // 儲存成功，清除未儲存狀態
+        hasUnsavedChanges = false;
         await refreshData();
         hideMask();
-
-        // 彈出明確儲存成功提示
         alert("🎉 工作任務設定已成功儲存！");
       } catch (e) {
         hideMask();
@@ -1650,20 +1620,11 @@
       currentMode = 'stats'; 
       showMask('載入統計...'); 
       try {
-        // 1. 同步取得在職員工清單與諮詢紀錄
-        const [
-          { data: staffData },
-          { data: consultData, error }
-        ] = await Promise.all([
-          _supabase.from('system_settings').select('value').eq('key', 'staff_list').single(),
-          _supabase.from('consultations').select('staff, status, care_staff, care_time, created_at')
-        ]);
+        const res = await fetch(`${API_BASE_URL}/api/stats/consultations`);
+        const data = await res.json();
 
-        if (error) throw error;
-
-        // 取得有效追蹤在職員工清單（排除全員與空值）
-        const activeStaffList = (staffData && staffData.value) ? staffData.value.filter(s => s && s !== '全員') : [];
-        const list = consultData || [];
+        const activeStaffList = (data.staffList || []).filter(s => s && s !== '全員');
+        const list = data.consultations || [];
         
         let earliestDate = "無資料";
         if (list.length > 0) {
@@ -1897,14 +1858,8 @@
     async function loadMyopiaData() {
       showMask('正在分析客戶追蹤總庫 (customers)...');
       try {
-        // ★ 直連客戶總庫 customers 表，並加上 .range(0, 4999) 突破 1000 筆上限
-        const { data, error } = await _clientsDb
-          .from('customers')
-          .select('*')
-          .range(0, 4999);
-        if (error) throw error;
-
-        const list = data || [];
+        const res = await fetch(`${API_BASE_URL}/api/myopia/customers`);
+        const list = await res.json();
         const currentFullYear = new Date().getFullYear();
         const currentRocYear = currentFullYear - 1911;
 
@@ -2164,8 +2119,8 @@
       const s = document.getElementById('loss-date-start').value, e = document.getElementById('loss-date-end').value;
       showMask('成效計算中...');
       try {
-        const { data, error } = await _supabase.from('consultations').select('*');
-        if (error) throw error;
+        const res = await fetch(`${API_BASE_URL}/api/stats/loss-data`);
+        const data = await res.json();
 
         const start = new Date(s); start.setHours(0,0,0,0);
         const end = new Date(e); end.setHours(23,59,59,999);
@@ -2311,11 +2266,12 @@
         const yest = new Date(now); yest.setDate(yest.getDate() - 1);
         const yestStr = `${yest.getFullYear()}/${pad(yest.getMonth()+1)}/${pad(yest.getDate())}`;
 
-        const { data: staffData } = await _supabase.from('system_settings').select('value').eq('key', 'staff_list').single();
-        const staffList = (staffData && staffData.value) ? staffData.value : [];
+        const res = await fetch(`${API_BASE_URL}/api/stats/twoday?today=${encodeURIComponent(todayStr)}`);
+        const data = await res.json();
 
-        const { data: shiftData } = await _supabase.from('schedules').select('*').eq('date', todayStr);
-        const { data: consultData } = await _supabase.from('consultations').select('*');
+        const staffList = data.staffList || [];
+        const shiftData = data.shifts || [];
+        const consultData = data.consultations || [];
 
         const twoDayList = staffList.map(name => {
           const shift = (shiftData || []).find(s => s.staff_name === name);
@@ -2943,11 +2899,14 @@
       showMask('成效計算中 (Supabase)...');
 
       try {
-        const { data: staffSetting } = await _supabase.from('system_settings').select('value').eq('key', 'staff_list').single();
-        const activeStaffList = (staffSetting && staffSetting.value) ? staffSetting.value.filter(x => x && x !== '全員') : [];
+        const [staffRes, consultRes] = await Promise.all([
+          fetch(`${API_BASE_URL}/api/stats/consultations`),
+          fetch(`${API_BASE_URL}/api/stats/loss-data`)
+        ]);
+        const staffData = await staffRes.json();
+        const data = await consultRes.json();
 
-        const { data, error } = await _supabase.from('consultations').select('*');
-        if (error) throw error;
+        const activeStaffList = (staffData.staffList || []).filter(x => x && x !== '全員');
 
         const statsContainer = {};
         const staffList = [];
@@ -3135,23 +3094,9 @@
       detailText.innerText = "統計容量中...";
 
       try {
-        // 批次向 Supabase 抓取各核心資料表的總記錄筆數
-        const [
-          { count: consultCount },
-          { count: handoverCount },
-          { count: childCount },
-          { count: docChangeCount },
-          { count: taskCount }
-        ] = await Promise.all([
-          _supabase.from('consultations').select('*', { count: 'exact', head: true }),
-          _supabase.from('handovers').select('*', { count: 'exact', head: true }),
-          _supabase.from('children_control').select('*', { count: 'exact', head: true }),
-          _supabase.from('doctor_shift_changes').select('*', { count: 'exact', head: true }),
-          _supabase.from('task_configs').select('*', { count: 'exact', head: true })
-        ]);
-
-        const totalRows = (consultCount || 0) + (handoverCount || 0) + (childCount || 0) + (docChangeCount || 0) + (taskCount || 0);
-
+        const res = await fetch(`${API_BASE_URL}/api/quota/check`);
+        const data = await res.json();
+        const totalRows = data.totalRows || 0;
         // 估算：Supabase 免費版資料庫上限為 500 MB (約可容納 20 萬筆常規文字與帶壓縮圖檔資料)
         // 以 200,000 筆為進度條基準刻度
         const MAX_CAPACITY_ROWS = 200000;
