@@ -170,6 +170,15 @@
       font-size: 13px;
       color: #78909c;
       margin-top: 10px;
+      padding: 4px 8px;
+      border-radius: 6px;
+      transition: all 0.2s ease;
+      display: inline-block;
+    }
+
+    .sidebar-user:hover {
+      background-color: #ffebee;
+      color: #e53935;
     }
 
     #home-menu {
@@ -922,7 +931,7 @@
   <nav id="sidebar">
     <div class="sidebar-header">
       <h1>工作任務維護</h1>
-      <div id="user-display" class="sidebar-user">👤 尚未登入</div>
+      <div id="user-display" class="sidebar-user" onclick="logout(true)" title="點擊此處可登出帳號" style="cursor: pointer; user-select: none;">👤 尚未登入</div>
     </div>
     <div id="home-menu">
       <div id="btn-weekly" class="menu-card btn-animate" onclick="openWork('weekly')"><span>📅</span>
@@ -1133,14 +1142,26 @@
     const SUPABASE_KEY = "sb_publishable_dsxxWLXxfbTHmXOfmEUUfA_Y8h1tykR";
     const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+    // 🔗 直連【客戶追蹤總表專案】(讀取 1117+ 全量客戶資料表 customers)
+    const CLIENTS_SUPABASE_URL = "https://wycoyydhcaeuabaelwdo.supabase.co";
+    const CLIENTS_SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind5Y295eWRoY2FldWFiYWVsd2RvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc5MDk2MDUsImV4cCI6MjEwMzQ4NTYwNX0.fkTge9-CHTIIYhQOfMpEmkRM9vOleM6rGd-h4sYDzjw";
+    const _clientsDb = (typeof supabase !== 'undefined' && supabase.createClient)
+      ? supabase.createClient(CLIENTS_SUPABASE_URL, CLIENTS_SUPABASE_KEY)
+      : _supabase;
+
     
 
     let allData = null, currentMode = '', currentUser = '', statsData = [], currentSlide = 0, myPieChart = null;
     let serviceStartDate = ""; 
 
+    // 獨立專屬 Token，防止不同系統相互踩踏覆蓋
+    const AUTH_TOKEN_KEY = "task_system_authorized_token";
+    const AUTH_USER_KEY = "task_system_staff_name";
+
     window.onload = async () => { 
-      const isVerified = localStorage.getItem("device_authorized_token");
-      const savedStaff = localStorage.getItem("current_staff_name");
+      // 雙向相容：優先抓本系統專屬，次抓通用
+      const isVerified = localStorage.getItem(AUTH_TOKEN_KEY) || localStorage.getItem("device_authorized_token");
+      const savedStaff = localStorage.getItem(AUTH_USER_KEY) || localStorage.getItem("current_staff_name");
 
       if (isVerified === "true" && savedStaff) {
         currentUser = savedStaff;
@@ -1149,26 +1170,29 @@
         document.getElementById('main-content').style.display = 'flex';
         document.getElementById('login-screen').style.display = 'none';
 
-        try {
-          const { data } = await _supabase.from('system_settings').select('value').eq('key', 'line_uid_map').single();
-          if (data && data.value && data.value[currentUser]) {
-            applyPermissions(data.value[currentUser].permissions || "ABCDEFGHIJ");
-          } else {
-            applyPermissions("ABCDEFGHIJ");
-          }
-        } catch (e) {
-          applyPermissions("ABCDEFGHIJ");
-        }
+        // 背景靜態讀取權限，絕不因網路報錯中斷登入狀態
+        _supabase.from('system_settings').select('value').eq('key', 'line_uid_map').single()
+          .then(({ data }) => {
+            if (data && data.value && data.value[currentUser]) {
+              applyPermissions(data.value[currentUser].permissions || "ABCDEFGHIJ");
+            } else {
+              applyPermissions("ABCDEFGHIJ");
+            }
+          })
+          .catch(() => applyPermissions("ABCDEFGHIJ"));
 
-        await refreshData();
-        checkSupabaseUsageQuota(); // 登入後自動執行容量監控
+        try {
+          await refreshData();
+          checkSupabaseUsageQuota();
+        } catch (err) {
+          console.warn("初始資料載入延遲，但不登出：", err);
+        }
         goHome();
       } else {
         document.getElementById('login-screen').style.display = 'flex';
       }
     };
 
-    // 移除超時登出計時，保留空函式防呆
     function setupInactivityTimer() {}
     function resetIdleTimer() {}
 
@@ -1202,6 +1226,9 @@
 
         if (authenticatedUser) {
           currentUser = authenticatedUser;
+          // 同時記錄專屬與通用 Token，永久綁定此裝置
+          localStorage.setItem(AUTH_TOKEN_KEY, "true");
+          localStorage.setItem(AUTH_USER_KEY, authenticatedUser);
           localStorage.setItem("device_authorized_token", "true");
           localStorage.setItem("current_staff_name", authenticatedUser);
 
@@ -1213,9 +1240,7 @@
           
           applyPermissions(userPermissions); 
           await refreshData(); 
-          checkSupabaseUsageQuota(); // 登入完成立即執行額度進度條統計
-          setupInactivityTimer(); 
-          resetIdleTimer();
+          checkSupabaseUsageQuota();
           goHome();
           hideMask();
         } else {
@@ -1232,15 +1257,19 @@
       }
     }
 
+    // 只有使用者「明確手動點擊登出按鈕」才會清除憑證
     function logout(confirmNeeded) {
       if(confirmNeeded && !confirm("確定要登出並取消本機授權嗎？")) return;
       const loginBtn = document.getElementById('login-btn');
-      loginBtn.innerText = '確認授權此裝置';      
-      loginBtn.classList.remove('working'); 
+      if (loginBtn) {
+        loginBtn.innerText = '確認授權此裝置';      
+        loginBtn.classList.remove('working'); 
+      }
       document.getElementById('login-pwd').value = '';
 
-      clearTimeout(idleTimer);
       currentUser = ''; 
+      localStorage.removeItem(AUTH_TOKEN_KEY);
+      localStorage.removeItem(AUTH_USER_KEY);
       localStorage.removeItem("device_authorized_token");
       localStorage.removeItem("current_staff_name");
       
@@ -1866,9 +1895,13 @@
     }
 
     async function loadMyopiaData() {
-      showMask('正在分析兒控大檔 (children_control)...');
+      showMask('正在分析客戶追蹤總庫 (customers)...');
       try {
-        const { data, error } = await _supabase.from('children_control').select('*');
+        // ★ 直連客戶總庫 customers 表，並加上 .range(0, 4999) 突破 1000 筆上限
+        const { data, error } = await _clientsDb
+          .from('customers')
+          .select('*')
+          .range(0, 4999);
         if (error) throw error;
 
         const list = data || [];
@@ -1912,10 +1945,18 @@
             pType = 'OK';
           }
 
-          // 1. 判斷使用中 / 停用
-          const isExplicitStop = (r.is_active === false || String(r.status || '').includes('停') || String(r.result || '').includes('停'));
-          const rawDays = r.days_not_back !== null && r.days_not_back !== undefined ? String(r.days_not_back).replace(/[^0-9]/g, '') : '';
-          const daysVal = rawDays !== '' ? parseInt(rawDays, 10) : 0; // 若無填寫預設為 0 天
+          // 1. 判斷使用中 / 停用 (相容 customers 資料表之 fdModify 與 overdueDays)
+          const isExplicitStop = (
+            r.is_active === false || 
+            r.fdModify === '停用' || 
+            r.overdueDays === '停用' || 
+            String(r.status || '').includes('停')
+          );
+          
+          // 抓取未回天數 (優先抓 overdueDays，備用 days_not_back)
+          const daysSource = r.overdueDays !== undefined ? r.overdueDays : r.days_not_back;
+          const rawDays = daysSource !== null && daysSource !== undefined ? String(daysSource).replace(/[^0-9]/g, '') : '';
+          const daysVal = rawDays !== '' ? parseInt(rawDays, 10) : 0;
           const isOverYearNotBack = daysVal > 365;
           const isActive = !(isExplicitStop || isOverYearNotBack);
 
