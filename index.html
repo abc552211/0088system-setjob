@@ -2650,8 +2650,6 @@
       }
     }
 
-        
-
     function renderConversionStats(res) {
       const currentScrollTop = window.scrollY || document.documentElement.scrollTop;
 
@@ -2833,7 +2831,7 @@
                 <div style="flex:1; min-width:240px; display:flex; align-items:center; gap:10px;">
                   <label style="font-size:13px; color:#2e7d32; font-weight:bold; white-space:nowrap; margin:0;">➕ 加入未登記締結件數</label>
                   <div style="position:relative; flex:1; display:flex; align-items:center;">
-                    <input type="text" inputmode="numeric" id="ext-closed-${index}" class="date-input" style="width:100%; height:36px; background:#ffffff; border-color:#c8e6c9; padding:0 28px 0 10px; margin:0; font-size:14px;" placeholder="0" oninput="this.value=this.value.replace(/[^0-9]/g,''); recalcConversion(${index}, ${item.total}, ${item.closed}, ${item.sumAmount}, ${item.maxAmount})">
+                    <input type="text" inputmode="numeric" id="ext-closed-${index}" class="date-input" style="width:100%; height:36px; background:#ffffff; border-color:#c8e6c9; padding:0 28px 0 10px; margin:0; font-size:14px;" placeholder="0" oninput="this.value=this.value.replace(/[^0-9]/g,''); window.recalcConversion(${index}, ${item.total}, ${item.closed}, ${item.sumAmount}, ${item.maxAmount})">
                     <button onclick="document.getElementById('ext-closed-${index}').value=''; recalcConversion(${index}, ${item.total}, ${item.closed}, ${item.sumAmount}, ${item.maxAmount});" style="position:absolute; right:6px; background:none; border:none; color:#ff8a80; cursor:pointer; font-size:14px; font-weight:bold; padding:2px 4px; outline:none;">✕</button>
                   </div>
                 </div>
@@ -3272,63 +3270,114 @@
         window.reassignItem(fromSpecialStaff, originalIndex, '', btnEl);
       }
     };
+    // ★ 核心修復：手動輸入締結件數時，總件數同步 +1，締結數也 +1
+    window.recalcConversion = function(index, baseTotal, baseClosed, baseSumAmount, baseMaxAmount) {
+      const extClosedInput = document.getElementById(`ext-closed-${index}`);
+      const extAmountInput = document.getElementById(`ext-amount-${index}`);
+
+      const extClosedVal = Number(extClosedInput ? extClosedInput.value : 0) || 0;
+      const extAmountVal = Number(extAmountInput ? extAmountInput.value : 0) || 0;
+
+      // 1. 同步加算：總件數 + extClosedVal，締結件數 + extClosedVal
+      const finalTotal = baseTotal + extClosedVal;
+      const finalClosed = baseClosed + extClosedVal;
+      const finalSum = baseSumAmount + extAmountVal;
+
+      // 2. 重新計算締結率與平均客單價
+      const finalRate = finalTotal > 0 ? ((finalClosed / finalTotal) * 100).toFixed(1) : "0.0";
+      const finalAvg = finalClosed > 0 ? Math.round(finalSum / finalClosed) : 0;
+
+      // 3. 更新該人員卡片的即時數字
+      const rateEl = document.getElementById(`rate-text-${index}`);
+      const countEl = document.getElementById(`count-text-${index}`);
+      const sumEl = document.getElementById(`sum-text-${index}`);
+      const avgEl = document.getElementById(`avg-text-${index}`);
+
+      if (rateEl) rateEl.innerText = `${finalRate}%`;
+      if (countEl) countEl.innerHTML = `${finalTotal} / <span style="font-size:19px; color:#2e7d32; font-weight:900;">${finalClosed}</span>`;
+      if (sumEl) sumEl.innerText = `$${finalSum.toLocaleString()}`;
+      if (avgEl) avgEl.innerText = `$${finalAvg.toLocaleString()}`;
+
+      // 4. 同步更新頂部主管總表對應列
+      if (globalConversionRes && globalConversionRes.staffList) {
+        updateStatsTextOnly(globalConversionRes);
+      }
+    };
 
     function updateStatsTextOnly(res) {
-      const sortedStaffList = [...res.staffList].sort((a, b) => {
-        const isSpecialA = (a.indexOf('未銷') !== -1 || a.indexOf('未指定') !== -1);
-        const isSpecialB = (b.indexOf('未銷') !== -1 || b.indexOf('未指定') !== -1);
-        return isSpecialA - isSpecialB; 
-      });
+      if (!res || !res.data || !res.staffList) return;
 
-      sortedStaffList.forEach((staff, index) => {
+      // 1. 優先依據各人員專屬的名字抓取手動輸入框數值
+      res.staffList.forEach((staff, origIdx) => {
         const item = res.data[staff];
-        const extClosedVal = Number(document.getElementById(`ext-closed-${index}`)?.value || 0);
-        const extAmountVal = Number(document.getElementById(`ext-amount-${index}`)?.value || 0);
+        if (!item) return;
 
-        const finalClosed = item.closed + extClosedVal;
-        const finalSum = item.sumAmount + extAmountVal;
-        const finalRate = item.total > 0 ? ((finalClosed / item.total) * 100).toFixed(1) : "0.0";
-        const finalAvg = item.total > 0 ? Math.round(finalSum / item.total) : 0;
+        const extClosedInput = document.getElementById(`ext-closed-${origIdx}`);
+        const extAmountInput = document.getElementById(`ext-amount-${origIdx}`);
 
-        const rateEl = document.getElementById(`rate-text-${index}`);
-        const countEl = document.getElementById(`count-text-${index}`);
-        const sumEl = document.getElementById(`sum-text-${index}`);
-        const avgEl = document.getElementById(`avg-text-${index}`);
-        const maxEl = document.getElementById(`max-text-${index}`);
+        const extClosedVal = Number(extClosedInput ? extClosedInput.value : 0) || 0;
+        const extAmountVal = Number(extAmountInput ? extAmountInput.value : 0) || 0;
+
+        // ★ 計算正確的最終總件與最終締結 (兩者同步 + extClosedVal)
+        const finalTotal = Number(item.total || 0) + extClosedVal;
+        const finalClosed = Number(item.closed || 0) + extClosedVal;
+        const finalSum = Number(item.sumAmount || 0) + extAmountVal;
+        const finalRate = finalTotal > 0 ? ((finalClosed / finalTotal) * 100).toFixed(1) : "0.0";
+        const finalAvg = finalClosed > 0 ? Math.round(finalSum / finalClosed) : 0;
+
+        // 更新各人員獨立卡片
+        const rateEl = document.getElementById(`rate-text-${origIdx}`);
+        const countEl = document.getElementById(`count-text-${origIdx}`);
+        const sumEl = document.getElementById(`sum-text-${origIdx}`);
+        const avgEl = document.getElementById(`avg-text-${origIdx}`);
+        const maxEl = document.getElementById(`max-text-${origIdx}`);
 
         if (rateEl) rateEl.innerText = `${finalRate}%`;
-        if (countEl) countEl.innerHTML = `${item.total} / <span style="font-size:19px; color:#2e7d32; font-weight:900;">${finalClosed}</span>`;
+        if (countEl) countEl.innerHTML = `${finalTotal} / <span style="font-size:19px; color:#2e7d32; font-weight:900;">${finalClosed}</span>`;
         if (sumEl) sumEl.innerText = `$${finalSum.toLocaleString()}`;
         if (avgEl) avgEl.innerText = `$${finalAvg.toLocaleString()}`;
-        if (maxEl) maxEl.innerText = `$${item.maxAmount.toLocaleString()}`;
+        if (maxEl) maxEl.innerText = `$${Number(item.maxAmount || 0).toLocaleString()}`;
       });
 
+      // 2. 更新頂部主管總表表格
       const masterCard = document.getElementById('conversion-master-summary-card');
       if (masterCard) {
         const tbody = masterCard.querySelector('tbody');
         if (tbody) {
+          const sortedStaffList = [...res.staffList].sort((a, b) => {
+            const isSpecialA = (a.indexOf('未銷') !== -1 || a.indexOf('未指定') !== -1);
+            const isSpecialB = (b.indexOf('未銷') !== -1 || b.indexOf('未指定') !== -1);
+            return isSpecialA - isSpecialB; 
+          });
+
           let newRowsHtml = '';
-          sortedStaffList.forEach((staff, index) => {
+          sortedStaffList.forEach((staff) => {
             const item = res.data[staff];
             const isSpecial = (staff.indexOf('未銷') !== -1 || staff.indexOf('未指定') !== -1);
             const rowBgColor = isSpecial ? '#f1f3f4' : '#ffffff';
 
-            const extClosedVal = Number(document.getElementById(`ext-closed-${index}`)?.value || 0);
-            const extAmountVal = Number(document.getElementById(`ext-amount-${index}`)?.value || 0);
+            // ★ 關鍵修正：透過 indexOf 精確定位該同仁在 res.staffList 的真實 index
+            const actualIdx = res.staffList.indexOf(staff);
+            const extClosedInput = document.getElementById(`ext-closed-${actualIdx}`);
+            const extAmountInput = document.getElementById(`ext-amount-${actualIdx}`);
 
-            const finalClosed = item.closed + extClosedVal;
-            const finalSum = item.sumAmount + extAmountVal;
-            const finalRate = item.total > 0 ? ((finalClosed / item.total) * 100).toFixed(1) : "0.0";
-            const finalAvg = item.total > 0 ? Math.round(finalSum / item.total) : 0;
+            const extClosedVal = Number(extClosedInput ? extClosedInput.value : 0) || 0;
+            const extAmountVal = Number(extAmountInput ? extAmountInput.value : 0) || 0;
+
+            const finalTotal = Number(item.total || 0) + extClosedVal;
+            const finalClosed = Number(item.closed || 0) + extClosedVal;
+            const finalSum = Number(item.sumAmount || 0) + extAmountVal;
+            const finalRate = finalTotal > 0 ? ((finalClosed / finalTotal) * 100).toFixed(1) : "0.0";
+            const finalAvg = finalClosed > 0 ? Math.round(finalSum / finalClosed) : 0;
 
             newRowsHtml += `
               <tr style="border-bottom: 1px solid #eef1f2; font-size: 13px; color: #546e7a; background: ${rowBgColor};">
                 <td style="padding: 12px 10px; font-weight: bold; color: ${isSpecial ? '#78909c' : '#37474f'};">👤 ${staff}</td>
-                <td style="padding: 12px 10px; text-align: center; font-weight: bold; color: #2e7d32;">${item.total} / ${finalClosed}</td>
+                <td style="padding: 12px 10px; text-align: center; font-weight: bold; color: #2e7d32;">${finalTotal} / ${finalClosed}</td>
                 <td style="padding: 12px 10px; text-align: center; color: #1976d2; font-weight: bold;">${finalRate}%</td>
                 <td style="padding: 12px 10px; text-align: right; font-weight: bold; color: #333;">$${finalSum.toLocaleString()}</td>
                 <td style="padding: 12px 10px; text-align: right; color: #546e7a;">$${finalAvg.toLocaleString()}</td>
-                <td style="padding: 12px 10px; text-align: right; color: #ef6c00; font-weight: bold;">$${item.maxAmount.toLocaleString()}</td>
+                <td style="padding: 12px 10px; text-align: right; color: #ef6c00; font-weight: bold;">$${Number(item.maxAmount || 0).toLocaleString()}</td>
               </tr>
             `;
           });
@@ -3344,11 +3393,18 @@
       
       group.total = 0; group.closed = 0; group.sumAmount = 0; group.maxAmount = 0;
       
+      // 判斷此明細是否為成功締結（狀態為締結 OR 帶有金額的訂金單 OR 自訂發配單）
+      const isRecordClosed = (d) => {
+        if (d.status === '締結' || d.status === '特殊') return true;
+        if (Number(d.amount || 0) > 0) return true; // 有金額的訂金單本質就是成交
+        return false;
+      };
+
       if (isSpecial) {
         group.details.forEach(d => {
           if (!d.assignedTo) {
             group.total++;
-            if (d.status === '締結') group.closed++;
+            if (isRecordClosed(d)) group.closed++;
             group.sumAmount += Number(d.amount || 0);
             if (Number(d.amount || 0) > group.maxAmount) group.maxAmount = Number(d.amount || 0);
           }
@@ -3357,14 +3413,18 @@
         const effectiveDetails = group.details.filter(d => !d.fromSpecialStaff || d.assignedTo === staffName);
         effectiveDetails.forEach(d => {
           group.total++;
-          if (d.status === '締結') group.closed++;
+          // ★ 關鍵修復：從未分類手動發配過來的單子，必須同時算入締結！
+          if (isRecordClosed(d) || d.fromSpecialStaff) {
+            group.closed++;
+          }
           group.sumAmount += Number(d.amount || 0);
           if (Number(d.amount || 0) > group.maxAmount) group.maxAmount = Number(d.amount || 0);
         });
       }
       
       group.rate = group.total > 0 ? ((group.closed / group.total) * 100).toFixed(1) : "0.0";
-      group.avgAmount = group.total > 0 ? Math.round(group.sumAmount / group.total) : 0;
+      // 平均客單價以成功締結數為除數
+      group.avgAmount = group.closed > 0 ? Math.round(group.sumAmount / group.closed) : 0;
     }
 
     function shareMasterSummaryCard() {
