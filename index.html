@@ -2740,7 +2740,7 @@
           });
         });
 
-        // (E) 步驟四：上傳檔案資料寫入（確保原始單號與完整品項清單 100% 寫入每筆單據）
+        // (E) 步驟四：上傳檔案資料寫入（未分類單據如實備妥金額，但未分類卡片總額保持 0；一旦分配立即加算）
         Object.values(consolidatedOrderMap).forEach(item => {
           const orderNo = cleanOrderNumber(item.orderNo);
           let matchedStaff = "";
@@ -2750,7 +2750,7 @@
           let matchedSaleItems = [];
           let finalOrderAmount = 0;
 
-          // 第一優先：比對完銷檔 (以乾淨單號比對)
+          // 嚴格規則：只有完銷檔有此單號，才屬於已完成締結並能自動指派人員
           if (orderNo && cachedCompletedSalesMap[orderNo]) {
             const compRecord = cachedCompletedSalesMap[orderNo];
             matchedStaff = compRecord.staff ? compRecord.staff.trim() : "";
@@ -2759,23 +2759,20 @@
             categoryAmountMap = compRecord.categoryAmounts || {};
             matchedSaleItems = compRecord.items || [];
             finalOrderAmount = Number(compRecord.totalAmount || 0);
-          }
-          // 第二優先：比對資料庫登記之人員
-          else if (orderNo && consultOrderMap[orderNo]) {
-            matchedStaff = consultOrderMap[orderNo];
+          } else {
+            // ★ 只要完銷檔對不到單號，一律歸入未銷貨分類，絕不私自掛給人員！
+            matchedStaff = "未銷貨/未指定人員";
             isCompleted = false;
-          } else if (item.customerName && consultCustomerMap[item.customerName]) {
-            matchedStaff = consultCustomerMap[item.customerName];
-            isCompleted = false;
+            finalOrderAmount = Number(item.totalAmount || 0);
           }
 
-          // 第三優先：未對到單號歸入未銷分類
-          const staffName = matchedStaff ? matchedStaff : "未銷貨/未指定人員";
+          const staffName = matchedStaff;
           initStaffGroup(staffName);
           const group = statsContainer[staffName];
 
-          group.total++; // 接待/留單總數 +1
+          group.total++; // 總件數 +1
 
+          // ★ 只有正式完銷締結的單子，才計入締結數與金額！
           if (isCompleted) {
             group.closed++; 
             group.sumAmount += finalOrderAmount;
@@ -2783,16 +2780,16 @@
           }
 
           group.details.push({
-            orderNo: orderNo,                // ★ 保留未截斷的原始純單號供比對
+            orderNo: orderNo,
             customerName: item.customerName,
             mainText: orderNo ? orderNo : '無單號',
             status: isCompleted ? '締結' : '待處理',
-            amount: finalOrderAmount,
-            baseAmount: finalOrderAmount,    // 備份初始檔案金額
-            depositAmount: item.totalAmount, // 訂金檔原金額
-            categories: itemCategories,      // 主類集合
+            amount: finalOrderAmount,        // ★ 如實記錄真實金額，未分類明細不再是 $0
+            baseAmount: finalOrderAmount,    // 備份供計算
+            depositAmount: item.totalAmount, // 訂金原額
+            categories: itemCategories,
             categoryAmounts: categoryAmountMap,
-            saleItems: matchedSaleItems      // ★ 完整品名與細項清單直接綁在物件上
+            saleItems: matchedSaleItems
           });
         });
 
@@ -3438,18 +3435,19 @@
           }
 
           const rawAmt = Number(d.baseAmount || 0);
-          const isClosedStatus = (d.status === '締結' || d.status === '特殊');
+          // ★ 嚴格判定：只有狀態為「締結」或「特殊」才算成交！「待處理」絕對不是成交！
+          const isRealClosed = (d.status === '締結' || d.status === '特殊');
 
-          if (isClosedStatus || rawAmt > 0) {
+          if (isRealClosed) {
             const check = checkOrderDetailExclusion(d);
             d.isExcludedByFilter = check.isExcluded;
             d.excludeReason = check.reason;
 
             if (check.isExcluded) {
-              // ★ 命中排除條件：整張單號全部歸 0，總件與締結不計入 (扣回)
+              // 命中排除條件：金額歸 0，不計入締結與總件
               d.amount = 0;
             } else {
-              // 未排除：正常計入有效總件與締結
+              // 未排除的正式成交單：計入總件、締結數與金額
               d.amount = rawAmt;
               effectiveTotalCount++;
               effectiveClosedCount++;
@@ -3461,7 +3459,7 @@
               }
             }
           } else {
-            // 接待未成交件數 (非成交單)，始終計入分母
+            // ★「待處理」或「接待未成交」：金額強制為 0，只計總件(分母)，絕不加總金額！
             d.amount = 0;
             d.isExcludedByFilter = false;
             d.excludeReason = '';
@@ -3881,40 +3879,45 @@
       if (!group) return;
       const isSpecial = (staffName.indexOf('未銷') !== -1 || staffName.indexOf('未指定') !== -1);
       
-      group.total = 0; group.closed = 0; group.sumAmount = 0; group.maxAmount = 0;
+      group.total = 0; 
+      group.closed = 0; 
+      group.sumAmount = 0; 
+      group.maxAmount = 0;
       
-      // 判斷此明細是否為成功締結（狀態為締結 OR 帶有金額的訂金單 OR 自訂發配單）
-      const isRecordClosed = (d) => {
-        if (d.status === '締結' || d.status === '特殊') return true;
-        if (Number(d.amount || 0) > 0) return true; // 有金額的訂金單本質就是成交
-        return false;
-      };
-
       if (isSpecial) {
+        // 未分類卡片：明細如實呈現金額，但未分配前「卡片上方總額」維持 0
         group.details.forEach(d => {
           if (!d.assignedTo) {
             group.total++;
-            if (isRecordClosed(d)) group.closed++;
-            group.sumAmount += Number(d.amount || 0);
-            if (Number(d.amount || 0) > group.maxAmount) group.maxAmount = Number(d.amount || 0);
+            // 未分配前締結保持 0，金額保持 0
           }
         });
       } else {
+        // 正式同仁卡片：包含本身完銷單 + 從未分類手動發配過來的單據
         const effectiveDetails = group.details.filter(d => !d.fromSpecialStaff || d.assignedTo === staffName);
+        
         effectiveDetails.forEach(d => {
-          group.total++;
-          // ★ 關鍵修復：從未分類手動發配過來的單子，必須同時算入締結！
-          if (isRecordClosed(d) || d.fromSpecialStaff) {
-            group.closed++;
+          const rawAmt = Number(d.baseAmount !== undefined ? d.baseAmount : (d.amount || 0));
+          const isFromSpecial = Boolean(d.fromSpecialStaff);
+          const isClosed = (d.status === '締結' || d.status === '特殊' || isFromSpecial);
+
+          group.total++; // 接待件數 +1
+
+          if (isClosed) {
+            group.closed++; // 締結數 +1
+            group.sumAmount += rawAmt; // ★ 金額直接累加進該同仁！
+            if (rawAmt > group.maxAmount) group.maxAmount = rawAmt;
           }
-          group.sumAmount += Number(d.amount || 0);
-          if (Number(d.amount || 0) > group.maxAmount) group.maxAmount = Number(d.amount || 0);
         });
       }
       
       group.rate = group.total > 0 ? ((group.closed / group.total) * 100).toFixed(1) : "0.0";
-      // 平均客單價以成功締結數為除數
       group.avgAmount = group.closed > 0 ? Math.round(group.sumAmount / group.closed) : 0;
+
+      // 若當前有套用品名/主類排除，重新執行一次過濾確保排除規則一致
+      if (typeof recalculateAllFinancials === 'function') {
+        recalculateAllFinancials();
+      }
     }
 
     function shareMasterSummaryCard() {
