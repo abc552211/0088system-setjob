@@ -1129,8 +1129,40 @@
           <button id="btn-clear-imported-files" class="btn-animate" style="background:#ffebee; color:#c62828; border:1px solid #ffcdd2; height:45px; border-radius:12px; font-weight:bold; font-size:13px; padding:0 12px; display:none;" onclick="clearImportedPerformanceFiles()">✕ 清除匯入檔案</button>
         </div>
         <div id="imported-files-status" style="width: 100%; font-size:12.5px; color:#2e7d32; font-weight:bold; margin-top: 4px; display:none;"></div>
+        <!-- 1. 諮詢品項標籤動態勾選控制區 (手動批次套用版) -->
+        <div id="consult-tag-filter-container" style="width: 100%; margin-top: 8px; padding: 10px 14px; background: #f0f7ff; border: 1px dashed #90caf9; border-radius: 10px; display: none;">
+          <div style="font-size: 13px; font-weight: bold; color: #1565c0; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span>總件篩選【諮詢品項/標籤】：</span>
+              <span id="consult-tag-selected-count" style="font-size: 11px; color: #546e7a; font-weight: normal;"></span>
+            </div>
+            <div style="display: flex; gap: 6px; align-items: center;">
+              <button type="button" class="btn-animate" onclick="toggleAllConsultTags(true)" style="background:#e3f2fd; color:#1565c0; border:1px solid #bbdefb; border-radius:4px; font-size:11px; padding:3px 8px; cursor:pointer; font-weight:bold;">全選</button>
+              <button type="button" class="btn-animate" onclick="toggleAllConsultTags(false)" style="background:#fff; color:#d32f2f; border:1px solid #ffcdd2; border-radius:4px; font-size:11px; padding:3px 8px; cursor:pointer; font-weight:bold;">清空</button>
+              <button type="button" class="btn-animate" onclick="applyConsultTagFilters()" style="background:#1565c0; color:#fff; border:none; border-radius:6px; font-size:12px; padding:3px 12px; cursor:pointer; font-weight:bold; box-shadow: 0 2px 4px rgba(21,101,192,0.3);">⚡ 套用篩選</button>
+            </div>
+          </div>
+          <div id="consult-tag-checkboxes-list" style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;"></div>
+        </div>
+
+        <!-- 2. 客單價排除商品主類 (U欄) 與品名關鍵字 (C欄) 控制區 -->
+        <div id="category-filter-container" style="width: 100%; margin-top: 8px; padding: 10px 14px; background: #fafafa; border: 1px dashed #cfd8dc; border-radius: 10px; display: none;">
+          <div style="font-size: 13px; font-weight: bold; color: #455a64; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between;">
+            <span>客單價計算排除【商品主類】(U欄)：</span>
+            <span style="font-size: 11px; font-weight: normal; color: #78909c;">勾選後，計算客單價時將扣除該類別金額</span>
+          </div>
+          <div id="category-checkboxes-list" style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 8px;"></div>
+          
+          <!-- 新增：品名多條件部分符合排除 -->
+          <div style="border-top: 1px dashed #cfd8dc; padding-top: 8px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+            <span style="font-size: 13px; font-weight: bold; color: #455a64;">🔍 排除【品名關鍵字】(C欄，部分符合)：</span>
+            <input type="text" id="exclude-item-names-input" class="date-input" style="flex: 1; min-width: 220px; height: 34px; font-size: 12.5px; padding: 0 10px; margin: 0; background: #fff;" placeholder="多個條件請以空白或逗號分隔，例: 藥水 鏡盒 夾子" onkeydown="if(event.key==='Enter') applyCategoryAndNameExclusions()">
+            <button type="button" class="btn-animate" onclick="applyCategoryAndNameExclusions()" style="background:#455a64; color:#fff; border:none; border-radius:6px; font-size:12px; padding:0 14px; height:34px; cursor:pointer; font-weight:bold;">套用排除</button>
+            <button type="button" class="btn-animate" onclick="document.getElementById('exclude-item-names-input').value=''; applyCategoryAndNameExclusions();" style="background:#fff; color:#78909c; border:1px solid #cfd8dc; border-radius:6px; font-size:12px; padding:0 10px; height:34px; cursor:pointer;">清空條件</button>
+          </div>
+        </div>
         <div style="width: 100%; font-size:12px; color:#78909c; margin-top: 2px;">
-          📊 比對邏輯：以訂金檔 (TempRpt_RSIRUnGet) 篩選日期區間，並以三聯單號比對完銷檔 (EC00EG_TempRpt__) 帶出銷售人；未銷單自動歸入未銷分類供手動指定。
+          📊 比對邏輯：以訂金檔 (TempRpt_RSIRUnGet) 篩選日期區間，並以三聯單號比對完銷檔 (EC00EG_TempRpt__) 帶出銷售人與商品主類；未銷單自動歸入未銷分類供手動指定。
         </div>
       </div>
       <div id="conversion-content" class="chart-grid"></div>
@@ -2392,8 +2424,108 @@
     }
 
     let globalConversionRes = null;
-    let cachedCompletedSalesMap = {}; // 暫存完銷檔單號對照表
+    let cachedCompletedSalesMap = {}; // 暫存完銷檔單號對照表 (含 U 欄商品主類)
     let cachedDepositRows = [];        // 暫存訂金檔所有資料列
+    let availableMainCategories = new Set(); // 存放完銷檔所有出現過的 U 欄商品主類
+    let excludedMainCategories = new Set();  // 使用者勾選要排除的商品主類
+
+    let availableConsultTags = new Set(); // 存放 consultations.event 偵測出的所有 [標籤]
+    let selectedConsultTags = new Set();  // 使用者勾選納入計算的品項標籤 (預設全選)
+
+    let isConsultTagsInitialized = false; // 標記是否已完成首次標籤初始化
+
+    // 從 event 字串中提取所有 [標籤]
+    function extractTagsFromEvent(eventStr) {
+      if (!eventStr) return [];
+      const matches = String(eventStr).match(/\[([^\]]+)\]/g);
+      if (!matches) return [];
+      return matches.map(m => m.replace(/[\[\]]/g, '').trim()).filter(Boolean);
+    }
+
+    // 動態渲染諮詢標籤勾選 UI (不重複改寫使用者的勾選狀態)
+    function renderConsultTagFilters(consultData) {
+      const container = document.getElementById('consult-tag-filter-container');
+      const listEl = document.getElementById('consult-tag-checkboxes-list');
+      const countEl = document.getElementById('consult-tag-selected-count');
+      if (!container || !listEl) return;
+
+      const detected = new Set();
+      (consultData || []).forEach(c => {
+        const tags = extractTagsFromEvent(c.event);
+        tags.forEach(t => detected.add(t));
+      });
+
+      availableConsultTags = detected;
+
+      // 只有第一次進來時才預設全選；若使用者已手動清空或調整過，則維持原設定
+      if (!isConsultTagsInitialized && availableConsultTags.size > 0) {
+        selectedConsultTags = new Set(availableConsultTags);
+        isConsultTagsInitialized = true;
+      }
+
+      if (availableConsultTags.size === 0) {
+        container.style.display = 'none';
+        listEl.innerHTML = '';
+        return;
+      }
+
+      container.style.display = 'block';
+
+      // 若目前選單已被建立，僅同步已選數量標籤，避免重構 DOM 導致正在勾選的使用者被打斷
+      if (listEl.children.length === availableConsultTags.size) {
+        if (countEl) countEl.innerText = `(已選 ${selectedConsultTags.size} / ${availableConsultTags.size} 項)`;
+        return;
+      }
+
+      let html = '';
+      Array.from(availableConsultTags).sort().forEach(tag => {
+        const isChecked = selectedConsultTags.has(tag) ? 'checked' : '';
+        html += `
+          <label style="display:inline-flex; align-items:center; gap:5px; font-size:12px; background:#fff; border:1px solid #bbdefb; padding:3px 8px; border-radius:6px; cursor:pointer; user-select:none; color:#1565c0; font-weight:600;">
+            <input type="checkbox" class="consult-tag-chk" value="${tag}" ${isChecked} style="cursor:pointer;">
+            <span>[${tag}]</span>
+          </label>
+        `;
+      });
+      listEl.innerHTML = html;
+      if (countEl) countEl.innerText = `(已選 ${selectedConsultTags.size} / ${availableConsultTags.size} 項)`;
+    }
+
+    // 全選 / 清空標籤：純粹修改畫面上核取方塊與全域集合，不觸發任何計算
+    window.toggleAllConsultTags = function(selectAll) {
+      const checkboxes = document.querySelectorAll('#consult-tag-checkboxes-list input.consult-tag-chk');
+      checkboxes.forEach(cb => {
+        cb.checked = selectAll;
+      });
+
+      if (selectAll) {
+        selectedConsultTags = new Set(availableConsultTags);
+      } else {
+        selectedConsultTags.clear();
+      }
+
+      const countEl = document.getElementById('consult-tag-selected-count');
+      if (countEl) countEl.innerText = `(已選 ${selectedConsultTags.size} / ${availableConsultTags.size} 項)`;
+    };
+
+    // 點擊「⚡ 套用篩選」：依次收集當前畫面所有勾選項目，只執行一次計算
+    window.applyConsultTagFilters = function() {
+      const checkedBoxes = document.querySelectorAll('#consult-tag-checkboxes-list input.consult-tag-chk:checked');
+      selectedConsultTags.clear();
+      checkedBoxes.forEach(cb => {
+        selectedConsultTags.add(cb.value);
+      });
+
+      const countEl = document.getElementById('consult-tag-selected-count');
+      if (countEl) countEl.innerText = `(已選 ${selectedConsultTags.size} / ${availableConsultTags.size} 項)`;
+
+      // 單次執行計算
+      if (cachedDepositRows.length > 0) {
+        processImportedPerformanceData();
+      } else {
+        loadConversionData();
+      }
+    };
 
     // 1. 單號極致清洗：只保留純英數字與減號，徹底清除 \x80 及所有不可見控制字元
     function cleanOrderNumber(val) {
@@ -2468,7 +2600,7 @@
       return clean.length > 6 ? clean.slice(-6) : clean;
     }
 
-    // 1. 業績檔案匯入模式 (支援三層匹配：完銷檔 > 資料庫諮詢檔 > 手動未分類)
+    // 1. 業績檔案匯入模式 (初始帶入人員件數與締結，不帶入資料庫金額，單號嚴格去重，金額一律以上傳檔案為準)
     async function processImportedPerformanceData() {
       const s = document.getElementById('conversion-date-start').value;
       const e = document.getElementById('conversion-date-end').value;
@@ -2486,7 +2618,7 @@
       showMask('正在彙整諮詢接待與業績資料...');
 
       try {
-        // (A) 改走 Worker 代理安全撈取員工與諮詢比對資料 (不使用 _supabase)
+        // (A) 安全讀取員工名單與諮詢記錄
         const [staffRes, consultRes] = await Promise.all([
           fetch(`${API_BASE_URL}/api/stats/consultations`),
           fetch(`${API_BASE_URL}/api/stats/loss-data`)
@@ -2496,22 +2628,10 @@
 
         const activeStaffList = (staffData.staffList || []).filter(x => x && x !== '全員');
 
-        // 建立資料庫諮詢檔的單號與客戶對照 Map (第二優先比對使用)
-        const consultOrderMap = {};
-        const consultCustomerMap = {};
-        (consultData || []).forEach(c => {
-          const cStaff = (c.staff || '').trim();
-          if (c.order_no) {
-            const cOrderClean = cleanOrderNumber(c.order_no);
-            if (cOrderClean) consultOrderMap[cOrderClean] = cStaff;
-          }
-          if (c.name && c.name !== '未登記') {
-            consultCustomerMap[c.name.trim()] = cStaff;
-          }
-        });
-
-        // (C) 步驟一：過濾日期區間，並將訂金檔中的「同一單號」合併加總
+        // (B) 步驟一：過濾日期區間，合併訂金檔相同單號的金額，並收集訂金檔所有已出現的單號集合
         const consolidatedOrderMap = {};
+        const uploadedOrderSet = new Set();
+
         cachedDepositRows.forEach((row, rIdx) => {
           const rawDateVal = row[0];
           const rowDate = parseFlexibleDate(rawDateVal);
@@ -2521,6 +2641,8 @@
           const customerName = String(row[2] || '未登記').trim();
           const amount = parseFloat(String(row[14]).replace(/,/g, '')) || 0;
           const uniqueKey = orderNo ? orderNo : `NO_ORDER_${customerName}_${rIdx}`;
+
+          if (orderNo) uploadedOrderSet.add(orderNo);
 
           if (!consolidatedOrderMap[uniqueKey]) {
             consolidatedOrderMap[uniqueKey] = {
@@ -2536,7 +2658,7 @@
           }
         });
 
-        // (D) 步驟二：建立人員統計容器 (預載在職員工)
+        // (C) 步驟二：建立人員統計容器 (預載在職員工，初始金額皆為 0)
         const statsContainer = {};
         const staffList = [];
 
@@ -2551,77 +2673,156 @@
 
         activeStaffList.forEach(st => initStaffGroup(st));
 
-        // 規則 1：諮詢紀錄 (純對應 col: staff)，在區間內且未成交 (非特殊、非締結) 者計入分母
+        // 建立資料庫諮詢檔輔助 Map (供比對銷售人員使用)
+        const consultOrderMap = {};
+        const consultCustomerMap = {};
+        (consultData || []).forEach(c => {
+          const cStaff = (c.staff || '').trim();
+          if (c.order_no) {
+            const cOrderClean = cleanOrderNumber(c.order_no);
+            if (cOrderClean) consultOrderMap[cOrderClean] = cStaff;
+          }
+          if (c.name && c.name !== '未登記') {
+            consultCustomerMap[c.name.trim()] = cStaff;
+          }
+        });
+
+        // 動態渲染諮詢品項 [標籤]
+        renderConsultTagFilters(consultData);
+
+        // (D) 步驟三：初始帶入資料庫諮詢紀錄的「接待件數」與「締結數」（支援 [標籤] 篩選、金額強制為 0，且嚴格比對單號防重複）
+        const processedDbOrders = new Set();
+
         (consultData || []).forEach(c => {
           const cDate = parseFlexibleDate(c.created_at);
           if (!cDate || cDate < startDate || cDate > endDate) return;
 
+          // 核心過濾：比對諮詢 event 中的 [標籤] (清空時所有帶標籤案件全數排除)
+          const rowTags = extractTagsFromEvent(c.event);
+          if (rowTags.length > 0) {
+            const hasMatchedTag = rowTags.some(t => selectedConsultTags.has(t));
+            if (!hasMatchedTag) return;
+          } else if (availableConsultTags.size > 0 && selectedConsultTags.size === 0) {
+            return;
+          }
+
           const statusStr = String(c.status || '').trim();
           const isSpecial = statusStr.includes('特殊');
           const isClosed = (statusStr === '締結');
+          const dbOrderNo = cleanOrderNumber(c.order_no);
 
-          // 只抓「接待未成交」：非特殊 且 非締結
-          if (!isSpecial && !isClosed) {
-            const staffName = (c.staff || '未指定人員').trim();
-            initStaffGroup(staffName);
-            const group = statsContainer[staffName];
-
-            group.total++; // 接待分母 +1
-            group.details.push({
-              customerName: c.name || '未登記',
-              mainText: c.note || '接待未成交',
-              status: statusStr || '未成交',
-              amount: 0
-            });
+          // 防重複核心：若該筆締結單號已存在於上傳檔案中，或者在資料庫已計過，則跳過，由上傳檔統一採計
+          if (dbOrderNo) {
+            if (uploadedOrderSet.has(dbOrderNo) || processedDbOrders.has(dbOrderNo)) {
+              return;
+            }
+            processedDbOrders.add(dbOrderNo);
           }
+
+          const staffName = (c.staff || '未指定人員').trim();
+          initStaffGroup(staffName);
+          const group = statsContainer[staffName];
+
+          // 只帶入件數與締結，金額一律維持 0，不污染檔案業績
+          group.total++; // 接待總件數 +1
+          if (isClosed || isSpecial) {
+            group.closed++; // 締結數 +1
+          }
+
+          const tagPrefix = rowTags.length > 0 ? `[${rowTags.join('][')}] ` : '';
+          group.details.push({
+            customerName: c.name || '未登記',
+            mainText: dbOrderNo ? `單號: ${formatOrder6(dbOrderNo)}` : (c.note ? `${tagPrefix}${c.note}` : (isClosed ? '已締結(無單號)' : `${tagPrefix}未成交`)),
+            status: isClosed ? (isSpecial ? '特殊' : '締結') : (statusStr || '未成交'),
+            amount: 0, // 資料庫金額強制為 0
+            categories: [],
+            categoryAmounts: {}
+          });
         });
 
-        // 規則 2：訂金檔承件三層比對 (1.完銷檔 -> 2.諮詢紀錄 -> 3.手動未分類)
+        // (E) 步驟四：上傳檔案資料寫入（確保原始單號與完整品項清單 100% 寫入每筆單據）
         Object.values(consolidatedOrderMap).forEach(item => {
-          const orderNo = item.orderNo;
+          const orderNo = cleanOrderNumber(item.orderNo);
           let matchedStaff = "";
           let isCompleted = false;
+          let itemCategories = [];
+          let categoryAmountMap = {};
+          let matchedSaleItems = [];
+          let finalOrderAmount = 0;
 
-          // 第一優先：比對 1 檔 (完銷檔 H 欄)
+          // 第一優先：比對完銷檔 (以乾淨單號比對)
           if (orderNo && cachedCompletedSalesMap[orderNo]) {
-            matchedStaff = cachedCompletedSalesMap[orderNo].staff.trim();
+            const compRecord = cachedCompletedSalesMap[orderNo];
+            matchedStaff = compRecord.staff ? compRecord.staff.trim() : "";
             isCompleted = true;
+            itemCategories = Array.from(compRecord.categories || []);
+            categoryAmountMap = compRecord.categoryAmounts || {};
+            matchedSaleItems = compRecord.items || [];
+            finalOrderAmount = Number(compRecord.totalAmount || 0);
           }
-          // 第二優先：比對 Supabase 諮詢紀錄 (order_no 或 客戶名)
+          // 第二優先：比對資料庫登記之人員
           else if (orderNo && consultOrderMap[orderNo]) {
             matchedStaff = consultOrderMap[orderNo];
-            isCompleted = true;
+            isCompleted = false;
           } else if (item.customerName && consultCustomerMap[item.customerName]) {
             matchedStaff = consultCustomerMap[item.customerName];
-            isCompleted = true;
+            isCompleted = false;
           }
 
-          // 第三優先：對不到則歸入手動「未銷貨/未指定人員」
+          // 第三優先：未對到單號歸入未銷分類
           const staffName = matchedStaff ? matchedStaff : "未銷貨/未指定人員";
           initStaffGroup(staffName);
           const group = statsContainer[staffName];
 
-          group.total++; // 接待總數 +1
+          group.total++; // 接待/留單總數 +1
 
           if (isCompleted) {
-            group.closed++; // 成功締結 +1
-            group.sumAmount += item.totalAmount;
-            if (item.totalAmount > group.maxAmount) group.maxAmount = item.totalAmount;
+            group.closed++; 
+            group.sumAmount += finalOrderAmount;
+            if (finalOrderAmount > group.maxAmount) group.maxAmount = finalOrderAmount;
           }
 
           group.details.push({
+            orderNo: orderNo,                // ★ 保留未截斷的原始純單號供比對
             customerName: item.customerName,
             mainText: orderNo ? orderNo : '無單號',
             status: isCompleted ? '締結' : '待處理',
-            amount: item.totalAmount
+            amount: finalOrderAmount,
+            baseAmount: finalOrderAmount,    // 備份初始檔案金額
+            depositAmount: item.totalAmount, // 訂金檔原金額
+            categories: itemCategories,      // 主類集合
+            categoryAmounts: categoryAmountMap,
+            saleItems: matchedSaleItems      // ★ 完整品名與細項清單直接綁在物件上
           });
         });
 
-        // (E) 步驟三：計算最終締結率與客單價
+        // (F) 步驟五：計算締結率與客單價（排除所勾選的 U 欄商品主類）
         staffList.forEach(staff => {
           const g = statsContainer[staff];
           g.rate = g.total > 0 ? ((g.closed / g.total) * 100).toFixed(1) : "0.0";
-          g.avgAmount = g.closed > 0 ? Math.round(g.sumAmount / g.closed) : 0;
+
+          let avgNumerator = 0;
+          let avgDenominator = 0;
+
+          g.details.forEach(d => {
+            if ((d.status === '締結' || d.amount > 0) && d.amount > 0) {
+              let excludedAmt = 0;
+              if (d.categoryAmounts && excludedMainCategories.size > 0) {
+                excludedMainCategories.forEach(cat => {
+                  if (d.categoryAmounts[cat]) excludedAmt += d.categoryAmounts[cat];
+                });
+              }
+              const effectiveAmt = Math.max(0, d.amount - excludedAmt);
+              if (effectiveAmt > 0) {
+                avgNumerator += effectiveAmt;
+                avgDenominator++;
+              }
+            }
+          });
+
+          g.avgAmount = avgDenominator > 0 
+            ? Math.round(avgNumerator / avgDenominator) 
+            : (g.closed > 0 && g.sumAmount > 0 ? Math.round(g.sumAmount / g.closed) : 0);
         });
 
         globalConversionRes = {
@@ -2748,7 +2949,6 @@
           const rawText = String(d.mainText || '').trim();
           let displayLabelText = '';
 
-          // 判斷是否為單號並轉為末 6 碼
           if (d.status === '締結' || rawText.match(/^\d+$/) || rawText.includes('單號')) {
             const cleanNo = cleanOrderNumber(rawText);
             const short6 = formatOrder6(cleanNo);
@@ -2757,27 +2957,30 @@
             displayLabelText = `💬 備註: ${rawText || '無'}`;
           }
 
-          const rowBg = dIdx % 2 === 0 ? '#ffffff' : (isSpecial ? '#ebeded' : '#f7f9f8');
-          
-          let rightSideHtml = '';
-          if (d.amount > 0) {
-            rightSideHtml = `
-              <span style="color:${d.status === '締結' ? '#43a047' : '#ef5350'}; font-weight:bold;">${d.status || '未處理'}</span>
-              <span style="color:#333; font-weight:bold; min-width:60px; text-align:right;">$${d.amount.toLocaleString()}</span>
-            `;
-          } else {
-            const statusText = String(d.status || '').trim();
-            const displayText = statusText !== '' ? statusText : '未處理';
-            let labelStyle = 'font-weight:bold;';
-            if (displayText === '未處理' || displayText === '未成交') {
-              labelStyle += 'color:#78909c; background:#eceff1; padding:2px 8px; border-radius:4px; font-size:12px;';
-            } else if (displayText === '締結') {
-              labelStyle += 'color:#43a047;';
-            } else { 
-              labelStyle += 'color:#ef5350;'; 
-            }
-            rightSideHtml = `<span style="${labelStyle}">${displayText}</span>`;
+          // 生成單據內容清單摘要 (無圖示、顯示品名前 12 字，懸停顯示完整資訊)
+          let itemsSummaryHtml = '';
+          const currentSaleItems = (d.saleItems && d.saleItems.length > 0) 
+            ? d.saleItems 
+            : ((cleanOrderNumber(d.mainText) && cachedCompletedSalesMap[cleanOrderNumber(d.mainText)]) ? cachedCompletedSalesMap[cleanOrderNumber(d.mainText)].items : []);
+
+          if (currentSaleItems && currentSaleItems.length > 0) {
+            const tags = currentSaleItems.map(si => {
+              const fullPName = String(si.productName || '').trim();
+              const shortName = fullPName.length > 12 ? fullPName.substring(0, 11) + '…' : (fullPName || si.category || '品項');
+              return `<span title="${fullPName} [${si.category || '無類別'}] ($${Number(si.amount||0).toLocaleString()})" style="background:#f1f5f9; color:#37474f; padding:1px 6px; border-radius:4px; font-size:11px; border:1px solid #cfd8dc; display:inline-block; max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${shortName}</span>`;
+            });
+            itemsSummaryHtml = `<div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:3px;">${tags.join('')}</div>`;
           }
+
+          const rowBg = dIdx % 2 === 0 ? '#ffffff' : (isSpecial ? '#ebeded' : '#f7f9f8');
+          const baseAmt = d.baseAmount !== undefined ? d.baseAmount : Number(d.amount || 0);
+
+          let rightSideHtml = `
+            <span style="color:${d.status === '締結' ? '#43a047' : (d.status === '特殊' ? '#7b1fa2' : '#78909c')}; font-weight:bold;">${d.status || '未處理'}</span>
+            <span class="detail-amt-box" data-base-amt="${baseAmt}" style="font-weight:bold; min-width:85px; text-align:right;">
+              $${baseAmt.toLocaleString()}
+            </span>
+          `;
           
           let assignSelectHtml = '';
           if (isSpecial && normalStaffOptions.length > 0) {
@@ -2794,15 +2997,16 @@
           }
           
           return `
-            <div class="conversion-detail-row" style="display:flex; justify-content:space-between; font-size:13px; padding:8px 12px; background:${rowBg}; border-radius:6px; margin-bottom:4px; align-items:center; flex-wrap:wrap; gap:12px;">
-              <div style="display:flex; flex-direction:column; gap:4px; flex:1; min-width:200px;">
+            <div class="conversion-detail-row" style="display:flex; justify-content:space-between; font-size:13px; padding:8px 12px; background:${rowBg}; border-radius:6px; margin-bottom:4px; align-items:center; flex-wrap:wrap; gap:10px;">
+              <div style="display:flex; flex-direction:column; gap:4px; flex:1; min-width:240px;">
                 <div style="color:#546e7a; font-weight:bold; word-break:break-all; line-height:1.4; display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
                   <span style="background:#efebe9; color:#4e342e; padding:2px 6px; border-radius:4px; font-size:11px; flex-shrink:0; user-select:none;">👤 客戶: ${d.customerName || '未登記'}</span>
                   <span style="font-size:13px; color:#546e7a;">${displayLabelText}</span>
                 </div>
+                ${itemsSummaryHtml}
                 ${assignSelectHtml}
               </div>
-              <div style="display:flex; align-items:center; gap:10px; flex-shrink:0;"> ${rightSideHtml} </div>
+              <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;"> ${rightSideHtml} </div>
             </div>
           `;
         }).join('');
@@ -2885,7 +3089,7 @@
       }, 80);
     }
 
-    // 2. 原生 Supabase 查詢模式：嚴格對應 col: staff
+    // 2. 原生 Supabase 查詢模式：支援篩選 [諮詢品項標籤]，金額一律為 $0
     async function loadConversionData() {
       if (cachedDepositRows.length > 0) {
         await processImportedPerformanceData();
@@ -2897,7 +3101,7 @@
       const startDate = s ? new Date(s) : new Date('2000-01-01'); startDate.setHours(0, 0, 0, 0);
       const endDate = e ? new Date(e) : new Date('2099-12-31'); endDate.setHours(23, 59, 59, 999);
 
-      showMask('成效計算中 (Supabase)...');
+      showMask('成效計算中 (初始接待與締結率)...');
 
       try {
         const [staffRes, consultRes] = await Promise.all([
@@ -2906,6 +3110,9 @@
         ]);
         const staffData = await staffRes.json();
         const data = await consultRes.json();
+
+        // 動態渲染諮詢品項 [標籤]
+        renderConsultTagFilters(data);
 
         const activeStaffList = (staffData.staffList || []).filter(x => x && x !== '全員');
 
@@ -2927,40 +3134,52 @@
           const cDate = parseFlexibleDate(row.created_at);
           if (!cDate || cDate < startDate || cDate > endDate) return;
 
+          // 核心過濾：比對諮詢 event 中的 [標籤] (清空時所有帶標籤案件全數排除)
+          const rowTags = extractTagsFromEvent(row.event);
+          if (rowTags.length > 0) {
+            const hasMatchedTag = rowTags.some(t => selectedConsultTags.has(t));
+            if (!hasMatchedTag) return;
+          } else if (availableConsultTags.size > 0 && selectedConsultTags.size === 0) {
+            return;
+          }
+
           const status = String(row.status || '').trim();
           const isSpecial = status.includes('特殊');
           const isClosed = (status === "締結" || isSpecial);
 
-          const staffName = (row.staff || "未指定人員").trim(); // 嚴格對應 col: staff
+          const staffName = (row.staff || "未指定人員").trim();
           const customerName = row.name || "未登記";
-          const amount = parseFloat(row.amount) || 0;
 
           initStaffGroup(staffName);
           const group = statsContainer[staffName];
 
-          if (!isSpecial && !isClosed) {
-            group.total++; // 接待未成交
-          } else if (isClosed) {
-            group.total++;  // 總接待 +1
-            group.closed++; // 成功締結 +1
-            group.sumAmount += amount;
-            if (amount > group.maxAmount) group.maxAmount = amount;
+          // 初始只統計件數與締結，不帶入任何資料庫金額
+          group.total++; // 接待總數 +1
+          if (isClosed) {
+            group.closed++; // 締結數 +1
           }
 
-          const mainText = isClosed ? (row.order_no || row.sales_note || (isSpecial ? "特殊結案" : "已締結")) : (row.note || "接待未成交");
+          const tagPrefix = rowTags.length > 0 ? `[${rowTags.join('][')}] ` : '';
+          const mainText = isClosed 
+            ? (row.order_no || row.sales_note || (isSpecial ? "特殊結案" : "已締結")) 
+            : (row.note ? `${tagPrefix}${row.note}` : `${tagPrefix}接待未成交`);
 
           group.details.push({
             customerName: customerName,
             mainText: mainText,
-            status: isClosed ? (isSpecial ? '特殊' : '締結') : (status || '未締結'),
-            amount: amount
+            status: isClosed ? (isSpecial ? '特殊' : '締結') : (status || '未成交'),
+            amount: 0, // 金額強制為 0
+            categories: [],
+            categoryAmounts: {}
           });
         });
 
         staffList.forEach(staff => {
           const g = statsContainer[staff];
           g.rate = g.total > 0 ? ((g.closed / g.total) * 100).toFixed(1) : "0.0";
-          g.avgAmount = g.closed > 0 ? Math.round(g.sumAmount / g.closed) : 0;
+          g.sumAmount = 0; // 初始強制為 0
+          g.maxAmount = 0; // 初始強制為 0
+          g.avgAmount = 0; // 初始強制為 0
         });
 
         globalConversionRes = {
@@ -3015,31 +3234,69 @@
       }
 
       try {
-        // (A) 解析 1 檔：完銷檔 (Q欄:索引16, F欄:索引5, G欄:索引6)
+        // (A) 解析 1 檔：完銷檔 (動態名稱定位：三聯單號、品名、商品主類、小計(含)、銷售人員名稱)
         if (completedFile) {
           const compData = await parseExcelOrCsv(completedFile);
           cachedCompletedSalesMap = {};
+          availableMainCategories.clear();
           let compValidCount = 0;
 
-          compData.forEach((row, idx) => {
-            if (idx === 0) return; // 略過表頭
-            const rawOrderNo = row[16];
-            const orderNo = cleanOrderNumber(rawOrderNo); // 強效清洗單號
-            const amount = parseFloat(String(row[5]).replace(/,/g, '')) || 0; // 去除千分位逗號
-            const staffName = String(row[7] || '').trim(); // 已改為 H 欄 (索引 7)
+          if (compData.length > 0) {
+            // 自動搜尋表頭欄位索引 (防止索引偏移)
+            const header = compData[0].map(h => String(h || '').trim());
+            const colOrder = header.findIndex(h => h.includes("三聯單號")) !== -1 ? header.findIndex(h => h.includes("三聯單號")) : 16;
+            const colName = header.findIndex(h => h.includes("品名")) !== -1 ? header.findIndex(h => h.includes("品名")) : 2;
+            const colAmount = header.findIndex(h => h.includes("小計(含)") || h.includes("小計")) !== -1 ? header.findIndex(h => h.includes("小計(含)") || h.includes("小計")) : 5;
+            const colStaff = header.findIndex(h => h.includes("銷售人員名稱")) !== -1 ? header.findIndex(h => h.includes("銷售人員名稱")) : (header.findIndex(h => h.includes("銷售人員")) !== -1 ? header.findIndex(h => h.includes("銷售人員")) : 7);
+            const colCat = header.findIndex(h => h.includes("商品主類")) !== -1 ? header.findIndex(h => h.includes("商品主類")) : 20;
 
-            if (orderNo) {
-              if (!cachedCompletedSalesMap[orderNo]) {
-                cachedCompletedSalesMap[orderNo] = { staff: staffName, totalAmount: 0, rawNo: rawOrderNo };
-                compValidCount++;
+            for (let idx = 1; idx < compData.length; idx++) {
+              const row = compData[idx];
+              if (!row || row.length === 0) continue;
+
+              const rawOrderNo = row[colOrder];
+              const orderNo = cleanOrderNumber(rawOrderNo);
+              const amount = parseFloat(String(row[colAmount] || 0).replace(/,/g, '')) || 0;
+              const staffName = String(row[colStaff] || '').trim();
+              const productName = String(row[colName] || '').trim();
+              const mainCat = String(row[colCat] || '').trim();
+
+              if (mainCat) {
+                availableMainCategories.add(mainCat);
               }
-              cachedCompletedSalesMap[orderNo].totalAmount += amount;
-              if (staffName && !cachedCompletedSalesMap[orderNo].staff) {
-                cachedCompletedSalesMap[orderNo].staff = staffName;
+
+              if (orderNo) {
+                if (!cachedCompletedSalesMap[orderNo]) {
+                  cachedCompletedSalesMap[orderNo] = { 
+                    staff: staffName, 
+                    totalAmount: 0, 
+                    rawNo: rawOrderNo,
+                    categories: new Set(),
+                    categoryAmounts: {},
+                    items: []
+                  };
+                  compValidCount++;
+                }
+
+                cachedCompletedSalesMap[orderNo].totalAmount += amount;
+                if (staffName && !cachedCompletedSalesMap[orderNo].staff) {
+                  cachedCompletedSalesMap[orderNo].staff = staffName;
+                }
+                if (mainCat) {
+                  cachedCompletedSalesMap[orderNo].categories.add(mainCat);
+                  cachedCompletedSalesMap[orderNo].categoryAmounts[mainCat] = 
+                    (cachedCompletedSalesMap[orderNo].categoryAmounts[mainCat] || 0) + amount;
+                }
+                cachedCompletedSalesMap[orderNo].items.push({
+                  productName: productName,
+                  category: mainCat,
+                  amount: amount
+                });
               }
             }
-          });
-          console.log(`[完銷檔] 成功讀取有效單號共 ${compValidCount} 筆，樣例：`, Object.keys(cachedCompletedSalesMap).slice(0, 5));
+          }
+          console.log(`[完銷檔] 成功讀取有效單號共 ${compValidCount} 筆，主類別清單：`, Array.from(availableMainCategories));
+          renderMainCategoryFilters();
         }
 
         // (B) 解析 2 檔：訂金檔 (A欄:索引0, Y欄:索引24, C欄:索引2, O欄:索引14)
@@ -3065,20 +3322,233 @@
       }
     }
 
+    // 渲染 U 欄商品主類勾選標籤
+    function renderMainCategoryFilters() {
+      const container = document.getElementById('category-filter-container');
+      const listEl = document.getElementById('category-checkboxes-list');
+      if (!container || !listEl) return;
+
+      if (availableMainCategories.size === 0) {
+        container.style.display = 'none';
+        listEl.innerHTML = '';
+        return;
+      }
+
+      container.style.display = 'block';
+      let html = '';
+      Array.from(availableMainCategories).sort().forEach(cat => {
+        const isChecked = excludedMainCategories.has(cat) ? 'checked' : '';
+        html += `
+          <label style="display:inline-flex; align-items:center; gap:5px; font-size:12.5px; background:#fff; border:1px solid #cfd8dc; padding:4px 10px; border-radius:6px; cursor:pointer; user-select:none; color:#37474f;">
+            <input type="checkbox" value="${cat}" ${isChecked} onchange="toggleCategoryExclusion('${cat}', this.checked)" style="cursor:pointer;">
+            <span>${cat}</span>
+          </label>
+        `;
+      });
+      listEl.innerHTML = html;
+    }
+    // 檢查該單號是否命中排除條件（部分符合品名關鍵字或勾選之商品主類）
+    function checkOrderDetailExclusion(detailItem) {
+      const rawInput = document.getElementById('exclude-item-names-input')?.value || '';
+      // 支援多關鍵字切割 (空格、全形空格、半形/全形逗號)
+      const inputKeywords = rawInput
+        .split(/[,，\s\u3000]+/)
+        .map(s => s.trim().toLowerCase())
+        .filter(Boolean);
+
+      // 若未勾選任何主類且未輸入任何關鍵字，直接判定不排除
+      if (excludedMainCategories.size === 0 && inputKeywords.length === 0) {
+        return { isExcluded: false, reason: '' };
+      }
+
+      // 1. 取得該單號項下的所有銷售商品細項 (直接抓 detailItem.saleItems 或透過 orderNo 補抓)
+      let itemsList = (detailItem.saleItems && detailItem.saleItems.length > 0) ? detailItem.saleItems : [];
+      
+      if (itemsList.length === 0) {
+        const orderKey = detailItem.orderNo || cleanOrderNumber(detailItem.mainText);
+        if (orderKey && cachedCompletedSalesMap[orderKey]) {
+          itemsList = cachedCompletedSalesMap[orderKey].items || [];
+          detailItem.saleItems = itemsList; // 寫回快取
+        }
+      }
+
+      if (itemsList && itemsList.length > 0) {
+        for (const item of itemsList) {
+          const pName = String(item.productName || '').trim();
+          const pNameLower = pName.toLowerCase();
+          const pCat = String(item.category || '').trim();
+
+          // (A) 檢查商品主類 (U欄) 勾選排除：命中任一項，整張單號全部歸 0
+          if (pCat && excludedMainCategories.has(pCat)) {
+            return { isExcluded: true, reason: pCat };
+          }
+
+          // (B) 檢查品名 (C欄) 多關鍵字部分符合：命中任一項，整張單號全部歸 0
+          if (inputKeywords.length > 0 && pNameLower) {
+            for (const kw of inputKeywords) {
+              if (pNameLower.includes(kw)) {
+                const shortReason = pName.length > 8 ? pName.substring(0, 7) + '…' : pName;
+                return { isExcluded: true, reason: shortReason };
+              }
+            }
+          }
+        }
+      }
+
+      // 2. 備用比對：檢查單據記錄的主類集合
+      const cats = detailItem.categories || [];
+      for (const c of cats) {
+        const cleanCat = String(c).trim();
+        if (cleanCat && excludedMainCategories.has(cleanCat)) {
+          return { isExcluded: true, reason: cleanCat };
+        }
+      }
+
+      // 3. 備用比對：檢查單據本身摘要文字
+      if (inputKeywords.length > 0 && detailItem.mainText) {
+        const textLower = String(detailItem.mainText).toLowerCase();
+        for (const kw of inputKeywords) {
+          if (textLower.includes(kw)) {
+            return { isExcluded: true, reason: kw };
+          }
+        }
+      }
+
+      return { isExcluded: false, reason: '' };
+    }
+
+    // 重新計算總金額、最高金額與客單價核心函式 (整單命中全部不計任何金額)
+    function recalculateAllFinancials() {
+      if (!globalConversionRes || !globalConversionRes.data) return;
+
+      globalConversionRes.staffList.forEach((staff) => {
+        const g = globalConversionRes.data[staff];
+        if (!g) return;
+
+        let totalValidSum = 0;
+        let maxValidAmt = 0;
+        let validOrderCount = 0;
+
+        g.details.forEach(d => {
+          // 基準金額初始化 (避免重複套用時金額遺失)
+          if (d.baseAmount === undefined) {
+            d.baseAmount = Number(d.amount || 0);
+          }
+
+          const origAmt = Number(d.baseAmount || 0);
+
+          if (origAmt > 0) {
+            const check = checkOrderDetailExclusion(d);
+            d.isExcludedByFilter = check.isExcluded;
+            d.excludeReason = check.reason;
+
+            if (check.isExcluded) {
+              // ★ 關鍵：命中排除條件，整張單號全部不計任何金額
+              d.amount = 0;
+            } else {
+              d.amount = origAmt;
+              totalValidSum += origAmt;
+              if (origAmt > maxValidAmt) maxValidAmt = origAmt;
+              validOrderCount++;
+            }
+          } else {
+            d.amount = 0;
+            d.isExcludedByFilter = false;
+            d.excludeReason = '';
+          }
+        });
+
+        // 重新寫入人員各項統計數值
+        g.sumAmount = totalValidSum;
+        g.maxAmount = maxValidAmt;
+        g.avgAmount = validOrderCount > 0 ? Math.round(totalValidSum / validOrderCount) : 0;
+      });
+
+      // 刷新主管總表與卡片數字
+      updateStatsTextOnly(globalConversionRes);
+
+      // 刷新展開明細上的刪除線與排除標註
+      refreshDetailsListDisplay();
+    }
+
+    // 刷新展開明細的金額樣式 (只覆蓋 detail-amt-box，不重疊字串)
+    function refreshDetailsListDisplay() {
+      if (!globalConversionRes || !globalConversionRes.data) return;
+
+      globalConversionRes.staffList.forEach((staff, sIdx) => {
+        const g = globalConversionRes.data[staff];
+        const cardBox = document.getElementById(`conversion-card-${sIdx}`);
+        if (!cardBox || !g) return;
+
+        const detailRows = cardBox.querySelectorAll('.conversion-detail-row');
+        g.details.forEach((d, dIdx) => {
+          const rowEl = detailRows[dIdx];
+          if (!rowEl) return;
+
+          const amtBox = rowEl.querySelector('.detail-amt-box');
+          if (amtBox) {
+            const origAmt = d.baseAmount !== undefined ? d.baseAmount : Number(d.amount || 0);
+            if (d.isExcludedByFilter) {
+              const reasonText = d.excludeReason ? `[含:${d.excludeReason}]` : `[已排除]`;
+              amtBox.innerHTML = `<span style="text-decoration:line-through; color:#90a4ae; font-size:11px; margin-right:4px;">$${origAmt.toLocaleString()}</span><b style="color:#d32f2f; font-size:11.5px;">$0 <span style="font-size:10px; font-weight:normal;">${reasonText}</span></b>`;
+            } else {
+              amtBox.innerHTML = `$${origAmt.toLocaleString()}`;
+              amtBox.style.color = '#333';
+            }
+          }
+        });
+      });
+    }
+
+    // 全域切換商品主類 (U欄) 核取方塊
+    window.toggleCategoryExclusion = function(category, isChecked) {
+      if (isChecked) {
+        excludedMainCategories.add(category);
+      } else {
+        excludedMainCategories.delete(category);
+      }
+      recalculateAllFinancials();
+    };
+
+    // 全域點擊「套用排除」或在輸入框按下 Enter 觸發
+    window.applyCategoryAndNameExclusions = function() {
+      recalculateAllFinancials();
+    };
+
+    // 全域切換商品主類 (U欄) 核取方塊
+    window.toggleCategoryExclusion = function(category, isChecked) {
+      if (isChecked) {
+        excludedMainCategories.add(category);
+      } else {
+        excludedMainCategories.delete(category);
+      }
+      recalculateAllFinancials();
+    };
+
+    // 全域點擊「套用排除」或在輸入框按下 Enter 觸發
+    window.applyCategoryAndNameExclusions = function() {
+      recalculateAllFinancials();
+    };
+
     
+
 
     // 清除已匯入檔案並重置為 Supabase 查詢
     function clearImportedPerformanceFiles() {
       cachedCompletedSalesMap = {};
       cachedDepositRows = [];
+      availableMainCategories.clear();
+      excludedMainCategories.clear();
 
       const fileInput = document.getElementById('conversion-file-input');
       const statusEl = document.getElementById('imported-files-status');
       const clearBtn = document.getElementById('btn-clear-imported-files');
+      const filterBox = document.getElementById('category-filter-container');
 
       if (fileInput) fileInput.value = '';
       if (statusEl) { statusEl.innerText = ''; statusEl.style.display = 'none'; }
       if (clearBtn) clearBtn.style.display = 'none';
+      if (filterBox) filterBox.style.display = 'none';
 
       alert("已清除匯入之檔案，系統已切回 Supabase 即時查詢！");
       loadConversionData();
@@ -3307,7 +3777,7 @@
     function updateStatsTextOnly(res) {
       if (!res || !res.data || !res.staffList) return;
 
-      // 1. 優先依據各人員專屬的名字抓取手動輸入框數值
+      // 1. 更新各人員卡片即時數據
       res.staffList.forEach((staff, origIdx) => {
         const item = res.data[staff];
         if (!item) return;
@@ -3318,14 +3788,17 @@
         const extClosedVal = Number(extClosedInput ? extClosedInput.value : 0) || 0;
         const extAmountVal = Number(extAmountInput ? extAmountInput.value : 0) || 0;
 
-        // ★ 計算正確的最終總件與最終締結 (兩者同步 + extClosedVal)
         const finalTotal = Number(item.total || 0) + extClosedVal;
         const finalClosed = Number(item.closed || 0) + extClosedVal;
         const finalSum = Number(item.sumAmount || 0) + extAmountVal;
         const finalRate = finalTotal > 0 ? ((finalClosed / finalTotal) * 100).toFixed(1) : "0.0";
-        const finalAvg = finalClosed > 0 ? Math.round(finalSum / finalClosed) : 0;
+        
+        // 客單價：若有手動加算外部金額則即時補入，否則以重算後的 item.avgAmount 為準
+        let finalAvg = Number(item.avgAmount || 0);
+        if (extAmountVal > 0) {
+          finalAvg = finalClosed > 0 ? Math.round(finalSum / finalClosed) : 0;
+        }
 
-        // 更新各人員獨立卡片
         const rateEl = document.getElementById(`rate-text-${origIdx}`);
         const countEl = document.getElementById(`count-text-${origIdx}`);
         const sumEl = document.getElementById(`sum-text-${origIdx}`);
@@ -3356,7 +3829,6 @@
             const isSpecial = (staff.indexOf('未銷') !== -1 || staff.indexOf('未指定') !== -1);
             const rowBgColor = isSpecial ? '#f1f3f4' : '#ffffff';
 
-            // ★ 關鍵修正：透過 indexOf 精確定位該同仁在 res.staffList 的真實 index
             const actualIdx = res.staffList.indexOf(staff);
             const extClosedInput = document.getElementById(`ext-closed-${actualIdx}`);
             const extAmountInput = document.getElementById(`ext-amount-${actualIdx}`);
@@ -3368,7 +3840,11 @@
             const finalClosed = Number(item.closed || 0) + extClosedVal;
             const finalSum = Number(item.sumAmount || 0) + extAmountVal;
             const finalRate = finalTotal > 0 ? ((finalClosed / finalTotal) * 100).toFixed(1) : "0.0";
-            const finalAvg = finalClosed > 0 ? Math.round(finalSum / finalClosed) : 0;
+
+            let finalAvg = Number(item.avgAmount || 0);
+            if (extAmountVal > 0) {
+              finalAvg = finalClosed > 0 ? Math.round(finalSum / finalClosed) : 0;
+            }
 
             newRowsHtml += `
               <tr style="border-bottom: 1px solid #eef1f2; font-size: 13px; color: #546e7a; background: ${rowBgColor};">
