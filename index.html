@@ -3071,7 +3071,7 @@
             
             <details ${isInternalOpen} style="border: 1px solid #eee; border-radius:10px; padding:6px 12px; background:#fff;">
               <summary style="font-size:13px; color:#546e7d; font-weight:bold; cursor:pointer; outline:none; user-select:none;">📋 展開查看內部系統明細 (${item.total} 筆)</summary>
-              <div style="margin-top:10px; max-height:260px; overflow-y:auto; padding:5px; background:#ffffff; border-radius:8px;">
+              <div style="margin-top:10px; max-height:520px; overflow-y:auto; padding:5px; background:#ffffff; border-radius:8px;">
                 ${detailsHtml}
               </div>
             </details>
@@ -3417,7 +3417,7 @@
       return { isExcluded: false, reason: '' };
     }
 
-    // 重新計算總金額、最高金額與客單價核心函式 (整單命中全部不計任何金額)
+    // 重新計算「總件/締結」、「締結率」、「總金額」、「最高金額」與「客單價」（已排除單號件數與締結同步扣回）
     function recalculateAllFinancials() {
       if (!globalConversionRes || !globalConversionRes.data) return;
 
@@ -3428,46 +3428,60 @@
         let totalValidSum = 0;
         let maxValidAmt = 0;
         let validOrderCount = 0;
+        let effectiveTotalCount = 0;
+        let effectiveClosedCount = 0;
 
         g.details.forEach(d => {
-          // 基準金額初始化 (避免重複套用時金額遺失)
+          // 基準金額備份初始化
           if (d.baseAmount === undefined) {
             d.baseAmount = Number(d.amount || 0);
           }
 
-          const origAmt = Number(d.baseAmount || 0);
+          const rawAmt = Number(d.baseAmount || 0);
+          const isClosedStatus = (d.status === '締結' || d.status === '特殊');
 
-          if (origAmt > 0) {
+          if (isClosedStatus || rawAmt > 0) {
             const check = checkOrderDetailExclusion(d);
             d.isExcludedByFilter = check.isExcluded;
             d.excludeReason = check.reason;
 
             if (check.isExcluded) {
-              // ★ 關鍵：命中排除條件，整張單號全部不計任何金額
+              // ★ 命中排除條件：整張單號全部歸 0，總件與締結不計入 (扣回)
               d.amount = 0;
             } else {
-              d.amount = origAmt;
-              totalValidSum += origAmt;
-              if (origAmt > maxValidAmt) maxValidAmt = origAmt;
-              validOrderCount++;
+              // 未排除：正常計入有效總件與締結
+              d.amount = rawAmt;
+              effectiveTotalCount++;
+              effectiveClosedCount++;
+
+              if (rawAmt > 0) {
+                totalValidSum += rawAmt;
+                if (rawAmt > maxValidAmt) maxValidAmt = rawAmt;
+                validOrderCount++;
+              }
             }
           } else {
+            // 接待未成交件數 (非成交單)，始終計入分母
             d.amount = 0;
             d.isExcludedByFilter = false;
             d.excludeReason = '';
+            effectiveTotalCount++;
           }
         });
 
-        // 重新寫入人員各項統計數值
+        // 重新賦值各項指標 (總件與締結即時扣除排除項目)
+        g.total = effectiveTotalCount;
+        g.closed = effectiveClosedCount;
+        g.rate = effectiveTotalCount > 0 ? ((effectiveClosedCount / effectiveTotalCount) * 100).toFixed(1) : "0.0";
         g.sumAmount = totalValidSum;
         g.maxAmount = maxValidAmt;
         g.avgAmount = validOrderCount > 0 ? Math.round(totalValidSum / validOrderCount) : 0;
       });
 
-      // 刷新主管總表與卡片數字
+      // 刷新主管總表與卡片即時數字 (總件、締結與金額連動)
       updateStatsTextOnly(globalConversionRes);
 
-      // 刷新展開明細上的刪除線與排除標註
+      // 刷新展開明細上的金額字樣與刪除線標註
       refreshDetailsListDisplay();
     }
 
