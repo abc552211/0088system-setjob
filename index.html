@@ -1674,6 +1674,14 @@
         });
 
         // 3. 僅統計在職人員的資料（已離職人員自動忽略跳過）
+        const formatCleanDate = (val) => {
+          if (!val) return null;
+          const d = parseFlexibleDate(val);
+          if (!d || isNaN(d.getTime())) return null;
+          const pad = n => String(n).padStart(2, '0');
+          return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())}`;
+        };
+
         list.forEach(r => {
           const staff = (r.staff || "").trim();
           
@@ -1682,8 +1690,13 @@
             staffMap[staff].total++;
             if (r.status === '已關懷') staffMap[staff].care++;
             if (r.status && r.status !== '待處理' && r.status !== '已關懷') staffMap[staff].closed++;
-            if (r.care_time) {
-              staffMap[staff].lastCare = r.care_time.replace('T', ' ').substring(0, 10);
+
+            const rawTime = r.care_time || r.care_date || (r.status === '已關懷' ? r.updated_at : null);
+            const cleanDate = formatCleanDate(rawTime);
+            if (cleanDate) {
+              if (staffMap[staff].lastCare === "無紀錄" || cleanDate > staffMap[staff].lastCare) {
+                staffMap[staff].lastCare = cleanDate;
+              }
             }
           }
         });
